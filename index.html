@@ -54,7 +54,7 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, collection, onSnapshot, updateDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot, updateDoc, deleteField, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const { useState, useEffect, useMemo, useRef, Fragment } = React;
 
@@ -70,7 +70,6 @@
             appId: "1:797056526732:web:b53ddf064101b1cc1fcea9"
         };
         
-        // 미리보기 환경과 사자비 님의 실제 배포 환경 모두에서 작동하도록 안전 장치 적용
         const finalConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : myFirebaseConfig;
         
         const app = initializeApp(finalConfig);
@@ -127,11 +126,14 @@
             const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
             const [detailModalData, setDetailModalData] = useState(null); 
             
-            // 설정 모달 상태
+            // 설정 모달
             const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
             const [tempSettings, setTempSettings] = useState(defaultSettings);
             const [editingKey, setEditingKey] = useState(null);
             const [pendingSettingsSave, setPendingSettingsSave] = useState(null);
+            
+            // 기능: 휴일 지정 모드 (단순 클릭 토글)
+            const [isHolidayMode, setIsHolidayMode] = useState(false);
             
             const [selectedDate, setSelectedDate] = useState(null);
             const [editingEvent, setEditingEvent] = useState(null);
@@ -181,6 +183,39 @@
                 return counters;
             }, [seasonEvents]);
 
+            const calendarWeeks = useMemo(() => {
+                const year = currentDate.getFullYear(), month = currentDate.getMonth();
+                const f = new Date(year, month, 1), l = new Date(year, month + 1, 0), d = [];
+                let off = f.getDay() === 0 ? 6 : f.getDay() - 1;
+                for (let i = 0; i < off; i++) d.push(null);
+                for (let i = 1; i <= l.getDate(); i++) d.push(new Date(year, month, i));
+                const w = [];
+                for (let i = 0; i < d.length; i += 7) {
+                    const week = d.slice(i, i + 7);
+                    while (week.length < 7) week.push(null);
+                    w.push([ week[0], week[1], week[2], week[3], week[4], {sat: week[5], sun: week[6]} ]);
+                }
+                return w;
+            }, [currentDate]);
+
+            // 주중 마스터 토글 상태 판별
+            const isMasterOn = useMemo(() => {
+                const currentMonthDays = calendarWeeks.flat().filter(d => d && d.sat === undefined && d.getMonth() === currentDate.getMonth());
+                let hasExpected = false; let allOn = true;
+                currentMonthDays.forEach(date => {
+                    const dow = date.getDay();
+                    if (dow === 0 || dow === 6) return;
+                    const dStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                    const ev = events.find(e => e.date === dStr);
+                    if (ev?.isHoliday) return;
+
+                    if (settings.isAfterSchoolEnglish.days.includes(dow)) { hasExpected = true; if (!ev?.isAfterSchoolEnglish) allOn = false; }
+                    if (settings.isChineseOnline.days.includes(dow)) { hasExpected = true; if (!ev?.isChineseOnline) allOn = false; }
+                    if (settings.isEnglishOnline.days.includes(dow)) { hasExpected = true; if (!ev?.isEnglishOnline) allOn = false; }
+                });
+                return hasExpected && allOn;
+            }, [calendarWeeks, currentDate, events, settings]);
+
             useEffect(() => {
                 const handleResize = () => setIsMobile(window.innerWidth < 768);
                 window.addEventListener('resize', handleResize);
@@ -202,7 +237,6 @@
                 return () => unsub();
             }, []);
 
-            // 이벤트 데이터 구독
             useEffect(() => {
                 if (!user) return;
                 const eventsRef = collection(db, 'artifacts', appId, 'public', 'data', 'events');
@@ -212,16 +246,12 @@
                 return () => unsub();
             }, [user]);
 
-            // 설정 데이터 구독 (연도별)
             useEffect(() => {
                 if (!user) return;
                 const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', season.year);
                 const unsubSettings = onSnapshot(settingsRef, (snap) => {
-                    if (snap.exists()) {
-                        setSettings({ ...defaultSettings, ...snap.data() });
-                    } else {
-                        setSettings(defaultSettings);
-                    }
+                    if (snap.exists()) setSettings({ ...defaultSettings, ...snap.data() });
+                    else setSettings(defaultSettings);
                 });
                 return () => unsubSettings();
             }, [user, season.year]);
@@ -231,21 +261,6 @@
                 window.addEventListener('click', closeMenu);
                 return () => window.removeEventListener('click', closeMenu);
             }, []);
-
-            const calendarWeeks = useMemo(() => {
-                const year = currentDate.getFullYear(), month = currentDate.getMonth();
-                const f = new Date(year, month, 1), l = new Date(year, month + 1, 0), d = [];
-                let off = f.getDay() === 0 ? 6 : f.getDay() - 1;
-                for (let i = 0; i < off; i++) d.push(null);
-                for (let i = 1; i <= l.getDate(); i++) d.push(new Date(year, month, i));
-                const w = [];
-                for (let i = 0; i < d.length; i += 7) {
-                    const week = d.slice(i, i + 7);
-                    while (week.length < 7) week.push(null);
-                    w.push([ week[0], week[1], week[2], week[3], week[4], {sat: week[5], sun: week[6]} ]);
-                }
-                return w;
-            }, [currentDate]);
 
             const handleTouchStart = (e) => { touchStart.current = e.touches[0].clientX; };
             const handleTouchEnd = (e) => {
@@ -266,9 +281,65 @@
             const getEventDocRef = (dateStr) => doc(db, 'artifacts', appId, 'public', 'data', 'events', dateStr);
 
             const toggleAct = async (dStr, cur, f) => {
-                if (!user || isMobile) return; 
+                if (!user || isMobile || isHolidayMode) return; 
                 const data = cur ? { [f]: !cur[f] } : { [f]: true, date: dStr };
                 await setDoc(getEventDocRef(dStr), data, { merge: true });
+            };
+
+            // ====== 단일 날짜 휴일 토글 함수 ======
+            const toggleHoliday = async (dateStr, ev) => {
+                if (!user || !dateStr) return;
+                const ref = getEventDocRef(dateStr);
+                if (ev?.isHoliday) {
+                    // 휴일 해제
+                    await setDoc(ref, { isHoliday: deleteField() }, { merge: true });
+                } else {
+                    // 휴일 지정 (기존 데이터 일괄 삭제 및 date 필드 추가)
+                    await setDoc(ref, {
+                        date: dateStr,
+                        isHoliday: true,
+                        schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(),
+                        classNum: deleteField(), people: deleteField(), note: deleteField(),
+                        startTime: deleteField(), endTime: deleteField(),
+                        isAfterSchoolEnglish: deleteField(), isChineseOnline: deleteField(),
+                        isEnglishOnline: deleteField(), isSpecialLecture: deleteField()
+                    }, { merge: true });
+                }
+            };
+
+            // ====== 마스터 일괄 토글 로직 ======
+            const toggleMasterEvents = async () => {
+                if (!user) return;
+                const currentMonthDays = calendarWeeks.flat().filter(d => d && d.sat === undefined && d.getMonth() === currentDate.getMonth());
+                const batch = writeBatch(db);
+                const turnOn = !isMasterOn;
+
+                currentMonthDays.forEach(date => {
+                    const dow = date.getDay();
+                    if (dow === 0 || dow === 6) return;
+                    const dStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                    const ev = events.find(e => e.date === dStr);
+                    if (ev?.isHoliday) return;
+
+                    const ref = getEventDocRef(dStr);
+                    if (turnOn) {
+                        let dataToSet = { date: dStr };
+                        let hasUpdate = false;
+                        if (settings.isAfterSchoolEnglish.days.includes(dow)) { dataToSet.isAfterSchoolEnglish = true; hasUpdate = true; }
+                        if (settings.isChineseOnline.days.includes(dow)) { dataToSet.isChineseOnline = true; hasUpdate = true; }
+                        if (settings.isEnglishOnline.days.includes(dow)) { dataToSet.isEnglishOnline = true; hasUpdate = true; }
+                        if (hasUpdate) batch.set(ref, dataToSet, { merge: true });
+                    } else {
+                        if (ev) {
+                            batch.set(ref, {
+                                isAfterSchoolEnglish: deleteField(),
+                                isChineseOnline: deleteField(),
+                                isEnglishOnline: deleteField()
+                            }, { merge: true });
+                        }
+                    }
+                });
+                await batch.commit();
             };
 
             // ====== 설정 저장 관련 로직 ======
@@ -285,30 +356,22 @@
                         changed.push(k);
                     }
                 });
-
-                if (changed.length > 0) {
-                    setPendingSettingsSave({ newSettings: tempSettings, changedKeys: changed });
-                } else {
-                    setIsSettingsModalOpen(false); // 변경사항 없으면 그냥 닫기
-                }
+                if (changed.length > 0) setPendingSettingsSave({ newSettings: tempSettings, changedKeys: changed });
+                else setIsSettingsModalOpen(false);
             };
 
             const confirmSettingsSave = async () => {
                 if (!pendingSettingsSave || !user) return;
                 const { newSettings, changedKeys } = pendingSettingsSave;
-                
-                // 설정값 Firestore에 저장
                 const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', season.year);
                 await setDoc(settingsRef, newSettings, { merge: true });
 
-                // 변경된 항목의 기존 일정 플래그를 모두 제거 (deleteField 활용)
                 for (const key of changedKeys) {
                     const eventsToClear = seasonEvents.filter(ev => ev[key] === true);
                     for (const ev of eventsToClear) {
                         await updateDoc(getEventDocRef(ev.date), { [key]: deleteField() });
                     }
                 }
-
                 setPendingSettingsSave(null);
                 setIsSettingsModalOpen(false);
             };
@@ -320,7 +383,6 @@
                     return { ...prev, [key]: { ...prev[key], days: newDays } };
                 });
             };
-            // =================================
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
@@ -348,14 +410,14 @@
                 setIsDeleteConfirmOpen(false); closeModal();
             };
 
-            const handleDragStart = (e, date) => { if (isMobile) return; setDraggedDate(date); e.currentTarget.classList.add('dragging'); };
-            const handleDragEnd = (e) => { if (isMobile) return; e.currentTarget.classList.remove('dragging'); };
+            const handleDragStart = (e, date) => { if (isMobile || isHolidayMode) return; setDraggedDate(date); e.currentTarget.classList.add('dragging'); };
+            const handleDragEnd = (e) => { if (isMobile || isHolidayMode) return; e.currentTarget.classList.remove('dragging'); };
             const handleDrop = async (e, targetDate) => {
                 e.preventDefault(); e.currentTarget.classList.remove('drop-target');
-                if (isMobile || !draggedDate || !user || draggedDate === targetDate) return;
+                if (isMobile || isHolidayMode || !draggedDate || !user || draggedDate === targetDate) return;
                 const sourceData = events.find(ev => ev.date === draggedDate);
                 const targetData = events.find(ev => ev.date === targetDate);
-                if (targetData && targetData.schoolName) { alert("해당 날짜에 이미 학교 일정이 있습니다."); return; }
+                if (targetData && (targetData.schoolName || targetData.isHoliday)) { alert("해당 날짜에 일정이 있거나 휴일입니다."); return; }
                 
                 const moveData = {
                     schoolName: sourceData.schoolName, schoolType: sourceData.schoolType,
@@ -371,11 +433,11 @@
                 });
                 setDraggedDate(null);
             };
-            const handleDragOver = (e) => { if (isMobile) return; e.preventDefault(); e.currentTarget.classList.add('drop-target'); };
-            const handleDragLeave = (e) => { if (isMobile) return; e.currentTarget.classList.remove('drop-target'); };
+            const handleDragOver = (e) => { if (isMobile || isHolidayMode) return; e.preventDefault(); e.currentTarget.classList.add('drop-target'); };
+            const handleDragLeave = (e) => { if (isMobile || isHolidayMode) return; e.currentTarget.classList.remove('drop-target'); };
 
             const handleContextMenu = (e, date, ev = null) => { 
-                if (isMobile) return; 
+                if (isMobile || isHolidayMode) return; 
                 e.preventDefault(); 
                 setContextMenu({ x: e.pageX, y: e.pageY, date: date, event: ev }); 
             };
@@ -384,9 +446,8 @@
             const pasteEvent = async (targetDate) => {
                 if (!copiedEvent || !user) return;
                 const existing = events.find(ev => ev.date === targetDate);
-                if (existing && existing.schoolName) { alert("이 날짜에 이미 학교 일정이 있습니다."); return; }
+                if (existing && (existing.schoolName || existing.isHoliday)) { alert("해당 날짜에 일정이 있거나 휴일입니다."); return; }
                 
-                // Firestore는 undefined 값을 허용하지 않으므로 구조 분해 할당으로 id만 안전하게 제외
                 const { id, ...eventDataToPaste } = copiedEvent;
                 const pasteData = { ...eventDataToPaste, date: targetDate, updatedAt: new Date().toISOString() };
                 
@@ -396,6 +457,7 @@
 
             const handleCellClick = (dStr, ev) => {
                 if (!dStr) return;
+                if (ev?.isHoliday && !isMobile) return; 
                 if (isMobile) setDetailModalData({ date: dStr, event: ev || {} });
                 else openModal(dStr, ev);
             };
@@ -429,13 +491,21 @@
                             </nav>
                         </div>
                         <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-xl border border-slate-200 shadow-inner">
-                                {/* PC 전용 톱니바퀴 설정 아이콘 */}
-                                {!isMobile && (
-                                    <button onClick={openSettingsModal} className="p-1 hover:bg-slate-100 text-slate-600 mr-1 border-r border-slate-200 pr-2 transition-colors">
+                            {/* PC 전용 톱니바퀴 + 기능 버튼 영역 */}
+                            {!isMobile && (
+                                <div className="flex items-center gap-2 mr-2 border-r border-slate-200 pr-4">
+                                    <button onClick={toggleMasterEvents} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all border ${isMasterOn ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                        <Icon name="check" size={12} /> 토글 마스터 {isMasterOn ? 'ON' : 'OFF'}
+                                    </button>
+                                    <button onClick={() => setIsHolidayMode(!isHolidayMode)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all border ${isHolidayMode ? 'bg-red-500 text-white border-red-500 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                        <Icon name="alert" size={12} /> 휴일 모드
+                                    </button>
+                                    <button onClick={openSettingsModal} className="p-1.5 hover:bg-slate-100 text-slate-500 rounded-lg ml-1 transition-colors">
                                         <Icon name="settings" size={16} />
                                     </button>
-                                )}
+                                </div>
+                            )}
+                            <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-xl border border-slate-200 shadow-inner">
                                 <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1 hover:bg-slate-50 text-slate-700"><Icon name="chevronLeft" size={16} /></button>
                                 <div className="px-2 font-black text-sm min-w-[90px] text-center text-slate-900">{currentDate.getFullYear()}.{String(currentDate.getMonth() + 1).padStart(2, '0')}</div>
                                 <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-1 hover:bg-slate-50 text-slate-700"><Icon name="chevronRight" size={16} /></button>
@@ -446,9 +516,9 @@
 
                     <main className="flex-1 flex flex-col p-1 md:p-2 min-h-0" onWheel={handleWheel} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
                         {activeTab === 'calendar' ? (
-                            <div className="flex-1 flex flex-col min-h-0 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-300">
-                                <div className="flex-none grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] bg-slate-900 border-b border-slate-800">
-                                    {['월', '화', '수', '목', '금', '토/일'].map(day => <div key={day} className={`py-1.5 md:py-2 text-center text-[10px] md:text-[11px] font-black ${day === '토/일' ? 'text-blue-300' : 'text-white'}`}>{day}{isMobile ? '' : '요일'}</div>)}
+                            <div className={`flex-1 flex flex-col min-h-0 bg-white rounded-xl shadow-2xl overflow-hidden border transition-all ${isHolidayMode ? 'border-red-400 ring-2 ring-red-200' : 'border-slate-300'}`}>
+                                <div className={`flex-none grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] border-b ${isHolidayMode ? 'bg-red-900 border-red-800' : 'bg-slate-900 border-slate-800'}`}>
+                                    {['월', '화', '수', '목', '금', '토/일'].map(day => <div key={day} className={`py-1.5 md:py-2 text-center text-[10px] md:text-[11px] font-black ${day === '토/일' ? (isHolidayMode ? 'text-red-300' : 'text-blue-300') : 'text-white'}`}>{day}{isMobile ? '' : '요일'}</div>)}
                                 </div>
                                 <div className="flex-1 flex flex-col min-h-0">
                                     {calendarWeeks.map((week, wIdx) => (
@@ -461,7 +531,6 @@
                                                 const isToday = dStr === new Date().toISOString().split('T')[0];
                                                 const dow = date ? date.getDay() : -1;
 
-                                                // 설정값에 기반한 노출 여부 판단
                                                 const showItem1 = settings.isAfterSchoolEnglish.name && settings.isAfterSchoolEnglish.days.includes(dow) && !isWe;
                                                 const showItem2 = settings.isChineseOnline.name && settings.isChineseOnline.days.includes(dow) && !isWe;
                                                 const showItem3 = settings.isEnglishOnline.name && settings.isEnglishOnline.days.includes(dow) && !isWe;
@@ -469,10 +538,13 @@
 
                                                 let dateColor = 'opacity-0';
                                                 let bgColor = 'bg-slate-50';
+                                                
                                                 if (date) {
                                                     bgColor = isToday ? 'bg-blue-50/50' : 'bg-white hover:bg-blue-50/10';
-                                                    if (isWe && ev?.isSpecialLecture && showItem4 && !isMobile) {
+                                                    if (isWe && ev?.isSpecialLecture && showItem4 && !isMobile && !ev?.isHoliday) {
                                                         bgColor = '!bg-blue-700'; dateColor = '!text-white';
+                                                    } else if (ev?.isHoliday) {
+                                                        bgColor = 'bg-red-50/30'; dateColor = 'text-red-600';
                                                     } else if (isWe) {
                                                         bgColor = 'bg-slate-50/50'; dateColor = 'text-blue-500'; 
                                                     } else if (isToday) {
@@ -483,14 +555,28 @@
                                                 }
 
                                                 return (
-                                                    <div key={`${wIdx}-${cIdx}`} onClick={() => !isWe && handleCellClick(dStr, ev)} onContextMenu={(e) => dStr && !isWe && handleContextMenu(e, dStr, ev)} onDragOver={dStr && !isWe ? handleDragOver : null} onDragLeave={handleDragLeave} onDrop={dStr && !isWe ? (e) => handleDrop(e, dStr) : null} className={`flex flex-col p-1 border-r last:border-r-0 transition-all ${isMobile ? '' : 'cursor-pointer'} overflow-hidden relative ${bgColor}`}>
+                                                    <div 
+                                                        key={`${wIdx}-${cIdx}`} 
+                                                        onClick={() => {
+                                                            if (!date) return;
+                                                            if (isHolidayMode) {
+                                                                toggleHoliday(dStr, ev);
+                                                            } else if (!isWe) {
+                                                                handleCellClick(dStr, ev);
+                                                            }
+                                                        }}
+                                                        onContextMenu={(e) => dStr && !isWe && handleContextMenu(e, dStr, ev)} 
+                                                        onDragOver={dStr && !isWe ? handleDragOver : null} 
+                                                        onDragLeave={handleDragLeave} 
+                                                        onDrop={dStr && !isWe ? (e) => handleDrop(e, dStr) : null} 
+                                                        className={`flex flex-col p-1 border-r last:border-r-0 transition-all ${isMobile ? '' : (date ? 'cursor-pointer' : '')} ${isHolidayMode && date ? 'hover:!bg-red-100' : ''} overflow-hidden relative ${bgColor}`}
+                                                    >
                                                         <div className="flex justify-between items-start mb-0.5 shrink-0">
                                                             <div className="flex items-center gap-1">
                                                                 <span className={`${isMobile && isWe ? 'text-[10px]' : isMobile ? 'text-xs' : 'text-base'} font-black ${dateColor}`}>{date?.getDate()}</span>
-                                                                {isMobile && ev?.note && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-sm mt-0.5"></div>}
+                                                                {isMobile && ev?.note && !ev?.isHoliday && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-sm mt-0.5"></div>}
                                                             </div>
-                                                            {/* 설정된 요일에만 아이콘 렌더링 */}
-                                                            {date && <div className="hidden md:flex gap-0.5 print:hidden opacity-60 hover:opacity-100 transition-opacity">
+                                                            {date && !ev?.isHoliday && <div className="hidden md:flex gap-0.5 print:hidden opacity-60 hover:opacity-100 transition-opacity">
                                                                 {showItem4 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isSpecialLecture'); }} className={`p-0.5 rounded ${ev?.isSpecialLecture ? 'text-yellow-400 bg-blue-800' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="star" size={14} /></button>}
                                                                 {showItem1 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isAfterSchoolEnglish'); }} className={`p-0.5 rounded ${ev?.isAfterSchoolEnglish ? 'text-emerald-600 bg-emerald-50 ring-1 ring-emerald-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="book" size={14} /></button>}
                                                                 {showItem2 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isChineseOnline'); }} className={`p-0.5 rounded ${ev?.isChineseOnline ? 'text-amber-600 bg-amber-50 ring-1 ring-amber-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="globe" size={14} /></button>}
@@ -498,53 +584,60 @@
                                                             </div>}
                                                         </div>
 
-                                                        {!isWe && ev && ev.schoolName && (
+                                                        {/* 일정 또는 휴일 렌더링 블록 */}
+                                                        {ev?.isHoliday ? (
                                                             isMobile ? (
-                                                                <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-0.5 pt-0.5 justify-start">
-                                                                    <div className={`text-slate-900 font-black text-[10px] leading-none ${ev.schoolName.length > 6 ? 'marquee-container w-full' : 'truncate'}`}><span className={ev.schoolName.length > 6 ? 'marquee-text' : ''}>{ev.schoolName}</span></div>
-                                                                    {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="text-blue-700 font-black text-[9px] leading-none truncate">{ev.selectedGrades?.length === 1 ? (ev.classNum !== '-' ? `${ev.selectedGrades[0]}-${ev.classNum}` : ev.selectedGrades[0]) : ev.selectedGrades?.join(',')}</div>}
+                                                                <div className="flex-1 min-h-0 flex flex-col justify-center items-center px-0.5 pt-1">
+                                                                    <div className="text-red-600 font-black text-[15px] bg-red-50 w-full text-center py-1 rounded border border-red-100">휴</div>
                                                                 </div>
                                                             ) : (
-                                                                <div draggable={true} onDragStart={(e) => handleDragStart(e, dStr)} onDragEnd={handleDragEnd} className="flex-1 min-h-0 overflow-hidden flex flex-col cursor-move">
-                                                                    {/* 1. 학교명: 최상단 고정, 크기 유지(shrink-0), 약간의 여백(mb-1), 글자 하단 잘림 방지(pb-[1px]) */}
-                                                                    <div className="text-[17px] font-black text-slate-900 leading-none truncate shrink-0 mb-1 pb-[1px]">{ev.schoolName}</div>
-                                                                    
-                                                                    {/* 2. 하단 정보 그룹: mt-auto를 주어 바닥으로 밀어내고 내부 요소 밀집(gap-0.5) */}
-                                                                    <div className="mt-auto flex flex-col gap-0.5 shrink-0">
-                                                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-bold text-slate-500 shrink-0 text-[10px]">
-                                                                            <div className="flex items-center gap-0.5 shrink-0 text-slate-700"><Icon name="clock" size={10} />{ev.startTime}~{ev.endTime}</div>
-                                                                            {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="flex items-center gap-0.5 text-blue-700 bg-blue-50 px-1 rounded shrink-0 font-black">{ev.selectedGrades?.join(',')}학년{ev.selectedGrades?.length === 1 && ev.classNum !== '-' ? ` ${ev.classNum}반` : ''}</div>}
-                                                                            <div className="flex items-center gap-0.5 text-emerald-600 font-black shrink-0"><Icon name="users" size={10} />{ev.people}명</div>
-                                                                        </div>
-                                                                        {ev.note ? (
-                                                                            <div className="text-[11px] text-red-600 font-black truncate leading-tight border-t border-red-50 pt-0.5">{ev.note}</div>
-                                                                        ) : null}
-                                                                    </div>
+                                                                <div className="flex-1 min-h-0 flex items-center justify-center">
+                                                                    <span className="text-red-500 font-black text-lg tracking-widest opacity-80 pointer-events-none">휴일</span>
                                                                 </div>
                                                             )
-                                                        )}
+                                                        ) : (
+                                                            <Fragment>
+                                                                {!isWe && ev && ev.schoolName && (
+                                                                    isMobile ? (
+                                                                        <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-0.5 pt-0.5 justify-start">
+                                                                            <div className={`text-slate-900 font-black text-[10px] leading-none ${ev.schoolName.length > 6 ? 'marquee-container w-full' : 'truncate'}`}><span className={ev.schoolName.length > 6 ? 'marquee-text' : ''}>{ev.schoolName}</span></div>
+                                                                            {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="text-blue-700 font-black text-[9px] leading-none truncate">{ev.selectedGrades?.length === 1 ? (ev.classNum !== '-' ? `${ev.selectedGrades[0]}-${ev.classNum}` : ev.selectedGrades[0]) : ev.selectedGrades?.join(',')}</div>}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div draggable={!isHolidayMode} onDragStart={(e) => handleDragStart(e, dStr)} onDragEnd={handleDragEnd} className="flex-1 min-h-0 overflow-hidden flex flex-col cursor-move pointer-events-none">
+                                                                            <div className="text-[17px] font-black text-slate-900 leading-none truncate shrink-0 mb-1 pb-[1px]">{ev.schoolName}</div>
+                                                                            <div className="mt-auto flex flex-col gap-0.5 shrink-0">
+                                                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-bold text-slate-500 shrink-0 text-[10px]">
+                                                                                    <div className="flex items-center gap-0.5 shrink-0 text-slate-700"><Icon name="clock" size={10} />{ev.startTime}~{ev.endTime}</div>
+                                                                                    {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="flex items-center gap-0.5 text-blue-700 bg-blue-50 px-1 rounded shrink-0 font-black">{ev.selectedGrades?.join(',')}학년{ev.selectedGrades?.length === 1 && ev.classNum !== '-' ? ` ${ev.classNum}반` : ''}</div>}
+                                                                                    <div className="flex items-center gap-0.5 text-emerald-600 font-black shrink-0"><Icon name="users" size={10} />{ev.people}명</div>
+                                                                                </div>
+                                                                                {ev.note ? <div className="text-[11px] text-red-600 font-black truncate leading-tight border-t border-red-50 pt-0.5">{ev.note}</div> : null}
+                                                                            </div>
+                                                                        </div>
+                                                                    )
+                                                                )}
 
-                                                        {/* 3. 하단 토글 배지: 특이사항 바로 아래에 붙도록 mt-0.5 적용, 밀집(gap-y-0.5) */}
-                                                        <div className="hidden md:flex flex-wrap gap-x-1 gap-y-0.5 z-10 shrink-0 mt-0.5">
-                                                            {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-1 rounded truncate border border-emerald-200">[{sessionCounters.isAfterSchoolEnglish[dStr]}] {settings.isAfterSchoolEnglish.name}</div>}
-                                                            {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded truncate border border-amber-200">[{sessionCounters.isChineseOnline[dStr]}] {settings.isChineseOnline.name}</div>}
-                                                            {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="text-[8px] font-black text-purple-700 bg-purple-50 px-1 rounded truncate border border-purple-200">[{sessionCounters.isEnglishOnline[dStr]}] {settings.isEnglishOnline.name}</div>}
-                                                            {isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && showItem4 && ( <div className="w-full text-white font-black text-center text-[12px] leading-tight py-4 drop-shadow-md">{settings.isSpecialLecture.name}<br/><span className="text-yellow-300">({sessionCounters.isSpecialLecture[dStr]}회)</span></div> )}
-                                                        </div>
+                                                                <div className="hidden md:flex flex-wrap gap-x-1 gap-y-0.5 z-10 shrink-0 mt-0.5 pointer-events-none">
+                                                                    {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-1 rounded truncate border border-emerald-200">[{sessionCounters.isAfterSchoolEnglish[dStr]}] {settings.isAfterSchoolEnglish.name}</div>}
+                                                                    {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded truncate border border-amber-200">[{sessionCounters.isChineseOnline[dStr]}] {settings.isChineseOnline.name}</div>}
+                                                                    {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="text-[8px] font-black text-purple-700 bg-purple-50 px-1 rounded truncate border border-purple-200">[{sessionCounters.isEnglishOnline[dStr]}] {settings.isEnglishOnline.name}</div>}
+                                                                    {isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && showItem4 && ( <div className="w-full text-white font-black text-center text-[12px] leading-tight py-4 drop-shadow-md">{settings.isSpecialLecture.name}<br/><span className="text-yellow-300">({sessionCounters.isSpecialLecture[dStr]}회)</span></div> )}
+                                                                </div>
 
-                                                        {/* 모바일 뷰어용 간소화된 마커 */}
-                                                        {isMobile && isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && (
-                                                            <div className="flex-1 flex items-center justify-center"><div className="text-blue-600 font-black text-[15px] bg-blue-50 w-full text-center py-1 rounded">토</div></div>
+                                                                {isMobile && isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && (
+                                                                    <div className="flex-1 flex items-center justify-center"><div className="text-blue-600 font-black text-[15px] bg-blue-50 w-full text-center py-1 rounded">토</div></div>
+                                                                )}
+                                                                {isMobile && !isWe && date && (
+                                                                    <div className="mt-auto flex gap-1 z-10 shrink-0 pb-0.5 px-0.5">
+                                                                        {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-sm"></div>}
+                                                                        {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-sm"></div>}
+                                                                        {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shadow-sm"></div>}
+                                                                    </div>
+                                                                )}
+                                                                {!ev?.schoolName && !ev?.isSpecialLecture && date && !isWe && <div className="hidden md:flex flex-1 items-center justify-center opacity-0 transition-opacity pointer-events-none"><Icon name="plus" size={32} className="text-slate-300" /></div>}
+                                                            </Fragment>
                                                         )}
-                                                        {isMobile && !isWe && date && (
-                                                            <div className="mt-auto flex gap-1 z-10 shrink-0 pb-0.5 px-0.5">
-                                                                {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-sm"></div>}
-                                                                {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-sm"></div>}
-                                                                {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shadow-sm"></div>}
-                                                            </div>
-                                                        )}
-
-                                                        {!ev?.schoolName && !ev?.isSpecialLecture && date && !isWe && <div className="hidden md:flex flex-1 items-center justify-center opacity-0 hover:opacity-100 transition-opacity"><Icon name="plus" size={32} className="text-slate-300" /></div>}
                                                     </div>
                                                 );
                                             })}
@@ -576,7 +669,7 @@
                         )}
                     </main>
 
-                    {/* PC 전용 톱니바퀴 설정 모달 */}
+                    {/* PC 설정 모달 */}
                     {isSettingsModalOpen && !isMobile && (
                         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
                             <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
@@ -586,8 +679,6 @@
                                 </div>
                                 <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar text-sm bg-white">
                                     <div className="text-xs font-bold text-slate-500 mb-2 leading-relaxed">이름을 빈칸으로 저장하면 해당 일정 아이콘은 달력에서 완전히 숨김 처리됩니다.</div>
-                                    
-                                    {/* 항목 렌더링 헬퍼 */}
                                     {[
                                         { key: 'isAfterSchoolEnglish', defaultIcon: 'book', color: 'text-emerald-600 bg-emerald-50' },
                                         { key: 'isChineseOnline', defaultIcon: 'globe', color: 'text-amber-600 bg-amber-50' },
@@ -611,22 +702,16 @@
                                                     )}
                                                 </div>
                                             </div>
-                                            
-                                            {/* 요일 선택부 (토요특강 제외) */}
                                             {!item.isFixed ? (
                                                 <div className="flex items-center gap-1.5 pl-9">
                                                     {[{lbl:'월', v:1}, {lbl:'화', v:2}, {lbl:'수', v:3}, {lbl:'목', v:4}, {lbl:'금', v:5}].map(d => {
                                                         const active = tempSettings[item.key].days.includes(d.v);
                                                         return (
-                                                            <button key={d.v} onClick={() => toggleTempDay(item.key, d.v)} className={`w-8 h-8 rounded-full text-xs font-black transition-all border ${active ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'}`}>
-                                                                {d.lbl}
-                                                            </button>
+                                                            <button key={d.v} onClick={() => toggleTempDay(item.key, d.v)} className={`w-8 h-8 rounded-full text-xs font-black transition-all border ${active ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'}`}>{d.lbl}</button>
                                                         );
                                                     })}
                                                 </div>
-                                            ) : (
-                                                <div className="pl-9 text-xs font-bold text-slate-400">주말 고정 배치</div>
-                                            )}
+                                            ) : ( <div className="pl-9 text-xs font-bold text-slate-400">주말 고정 배치</div> )}
                                         </div>
                                     ))}
                                 </div>
@@ -638,7 +723,7 @@
                         </div>
                     )}
 
-                    {/* PC 설정 변경 경고 커스텀 모달 (Rule 위반 alert/confirm 대체) */}
+                    {/* PC 설정 변경 경고 커스텀 모달 */}
                     {pendingSettingsSave && !isMobile && (
                         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in zoom-in duration-150">
                             <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-red-100">
@@ -655,13 +740,16 @@
                         </div>
                     )}
 
-                    {/* 모바일 전용 날짜 클릭 시 상세 조회 모달 (커스텀 설정 이름 반영) */}
+                    {/* 모바일 날짜 클릭 상세 조회 모달 */}
                     {detailModalData && (
                         <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in duration-200" onClick={() => setDetailModalData(null)}>
                             <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden border border-slate-200 shadow-2xl p-5 relative" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={() => setDetailModalData(null)} className="absolute top-4 right-4 p-1.5 bg-slate-100 text-slate-600 rounded-full hover:bg-slate-200"><Icon name="x" size={18} /></button>
                                 <h3 className="text-sm font-black text-blue-600 border-b pb-2 mb-4">{detailModalData.date} 일정</h3>
-                                {detailModalData.event?.schoolName ? (
+                                
+                                {detailModalData.event?.isHoliday ? (
+                                    <div className="text-lg font-black text-red-500 py-6 text-center tracking-widest bg-red-50 rounded-xl border border-red-100">지정된 휴일입니다.</div>
+                                ) : detailModalData.event?.schoolName ? (
                                     <div className="space-y-2">
                                         <div className="text-xl font-black text-slate-900">{detailModalData.event.schoolName}</div>
                                         <div className="text-sm font-bold text-slate-600 flex justify-between border-b border-slate-50 pb-2">
@@ -673,21 +761,22 @@
                                     </div>
                                 ) : ( <div className="text-sm font-bold text-slate-400 py-4 text-center">등록된 일정이 없습니다.</div> )}
                                 
-                                <div className="mt-4 pt-3 border-t border-slate-100">
-                                    <div className="text-[10px] font-black text-slate-400 mb-2">기타 일정</div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {detailModalData.event?.isSpecialLecture && settings.isSpecialLecture.name && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-[11px] font-black border border-blue-200">{settings.isSpecialLecture.name}</span>}
-                                        {detailModalData.event?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded text-[11px] font-black border border-emerald-200">{settings.isAfterSchoolEnglish.name}</span>}
-                                        {detailModalData.event?.isChineseOnline && settings.isChineseOnline.name && <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-[11px] font-black border border-amber-200">{settings.isChineseOnline.name}</span>}
-                                        {detailModalData.event?.isEnglishOnline && settings.isEnglishOnline.name && <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-[11px] font-black border border-purple-200">{settings.isEnglishOnline.name}</span>}
+                                {!detailModalData.event?.isHoliday && (
+                                    <div className="mt-4 pt-3 border-t border-slate-100">
+                                        <div className="text-[10px] font-black text-slate-400 mb-2">기타 일정</div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {detailModalData.event?.isSpecialLecture && settings.isSpecialLecture.name && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-[11px] font-black border border-blue-200">{settings.isSpecialLecture.name}</span>}
+                                            {detailModalData.event?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded text-[11px] font-black border border-emerald-200">{settings.isAfterSchoolEnglish.name}</span>}
+                                            {detailModalData.event?.isChineseOnline && settings.isChineseOnline.name && <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-[11px] font-black border border-amber-200">{settings.isChineseOnline.name}</span>}
+                                            {detailModalData.event?.isEnglishOnline && settings.isEnglishOnline.name && <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-[11px] font-black border border-purple-200">{settings.isEnglishOnline.name}</span>}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </div>
                         </div>
                     )}
 
-                    {/* 기존 PC 모달들 생략 (삭제확인, 에디터, 컨텍스트 메뉴 동일 유지) */}
-                    {contextMenu && !isMobile && (
+                    {contextMenu && !isMobile && !isHolidayMode && (
                         <div className="fixed z-[300] bg-white border border-slate-200 shadow-2xl rounded-xl py-2 w-48" style={{ left: contextMenu.x, top: contextMenu.y }}>
                             {contextMenu.event?.schoolName && ( <button onClick={() => copyEvent(contextMenu.event)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-slate-700"><Icon name="copy" size={16} /> 학교 일정 복사</button> )}
                             {copiedEvent && ( <button onClick={() => pasteEvent(contextMenu.date)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-blue-600"><Icon name="check" size={16} /> 여기에 일정 붙여넣기</button> )}
@@ -708,7 +797,7 @@
                         </div>
                     )}
 
-                    {isModalOpen && (
+                    {isModalOpen && !isHolidayMode && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
                             <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
                                 <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shadow-sm">
@@ -751,5 +840,4 @@
         root.render(<App />);
     </script>
 </body>
-
 </html>
