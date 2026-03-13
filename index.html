@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JGC 통합 일정 관리 시스템</title>
+    <title>2026 통합 일정 관리 시스템</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & Babel -->
@@ -385,7 +385,11 @@
                 if (!copiedEvent || !user) return;
                 const existing = events.find(ev => ev.date === targetDate);
                 if (existing && existing.schoolName) { alert("이 날짜에 이미 학교 일정이 있습니다."); return; }
-                const pasteData = { ...copiedEvent, id: undefined, date: targetDate, updatedAt: new Date().toISOString() };
+                
+                // Firestore는 undefined 값을 허용하지 않으므로 구조 분해 할당으로 id만 안전하게 제외
+                const { id, ...eventDataToPaste } = copiedEvent;
+                const pasteData = { ...eventDataToPaste, date: targetDate, updatedAt: new Date().toISOString() };
+                
                 await setDoc(getEventDocRef(targetDate), pasteData, { merge: true });
                 setContextMenu(null);
             };
@@ -747,5 +751,4 @@
         root.render(<App />);
     </script>
 </body>
-
 </html>
