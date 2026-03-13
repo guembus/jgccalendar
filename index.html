@@ -19,7 +19,7 @@
             margin: 0; 
             padding: 0; 
             overflow: hidden; 
-            font-family: 'Pretendard', -apple-system, sans-serif;
+            font-family: 'Pretendard', sans-serif;
             background-color: #f1f5f9;
         }
 
@@ -62,29 +62,30 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, Fragment, useRef } = React;
 
-        // --- [필수] Firebase 설정: 본인의 정보를 입력하세요 ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-     apiKey: "AIzaSyDcgyT68OxF6AvkOqStl3fl-1iqZaQ-uoY",
-      authDomain: "jgccalendar-d84b6.firebaseapp.com",
-      projectId: "jgccalendar-d84b6",
-      storageBucket: "jgccalendar-d84b6.firebasestorage.app",
-      messagingSenderId: "797056526732",
-      appId: "1:797056526732:web:b53ddf064101b1cc1fcea9"  
-            authDomain: "",
-            projectId: "",
-            storageBucket: "",
-            messagingSenderId: "",
-            appId: ""
+        // ================================================================
+        // [필독] 여기에 본인의 파이어베이스 정보를 복사해서 붙여넣으세요!
+        // 파이어베이스 콘솔 -> 프로젝트 설정 -> 내 앱 -> firebaseConfig 객체 내용
+        // ================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyDcgyT68OxF6AvkOqStl3fl-1iqZaQ-uoY",
+            authDomain: "jgccalendar-d84b6.firebaseapp.com",
+            projectId: "jgccalendar-d84b6",
+            storageBucket: "jgccalendar-d84b6.firebasestorage.app",
+            messagingSenderId: "797056526732",
+            appId: "1:797056526732:web:b53ddf064101b1cc1fcea9"
         };
+        // ================================================================
 
-        if (firebaseConfig.apiKey && !firebase.apps.length) {
+        // 초기화 가드
+        const hasValidConfig = firebaseConfig.apiKey && firebaseConfig.apiKey.length > 0;
+        if (hasValidConfig && !firebase.apps.length) {
             firebase.initializeApp(firebaseConfig);
         }
-        const auth = firebaseConfig.apiKey ? firebase.auth() : null;
-        const db = firebaseConfig.apiKey ? firebase.firestore() : null;
+        const auth = hasValidConfig ? firebase.auth() : null;
+        const db = hasValidConfig ? firebase.firestore() : null;
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'program-manager-2026';
 
-        // 아이콘 렌더러 (Adjacent JSX elements 에러 방지)
+        // 아이콘 렌더러
         const Icon = ({ name, size = 16, className = "" }) => {
             const icons = {
                 calendar: <Fragment><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /></Fragment>,
@@ -113,7 +114,27 @@
         };
 
         const App = () => {
-            const hasFirebase = !!firebaseConfig.apiKey;
+            // 설정 누락 시 안내 화면
+            if (!hasValidConfig) {
+                return (
+                    <div className="flex items-center justify-center h-screen bg-slate-900 text-white p-8 text-center">
+                        <div className="max-w-md bg-slate-800 p-8 rounded-[40px] shadow-2xl border border-slate-700">
+                            <Icon name="alert" size={64} className="mx-auto text-amber-400 mb-6" />
+                            <h1 className="text-2xl font-black mb-4">Firebase 설정이 비어있습니다</h1>
+                            <p className="text-slate-400 text-sm leading-relaxed mb-8 text-left">
+                                index.html 파일을 열고 <b>70번 라인 근처</b>에 있는 <code className="bg-slate-900 px-1 rounded text-blue-400">firebaseConfig</code> 객체 안의 빈 칸들을 본인의 정보로 채워주세요.
+                            </p>
+                            <div className="bg-slate-900 p-4 rounded-2xl text-xs font-mono text-left opacity-50">
+                                const firebaseConfig = &#123;<br/>
+                                &nbsp;&nbsp;apiKey: "여기에 입력",<br/>
+                                &nbsp;&nbsp;...<br/>
+                                &#125;;
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
             const [user, setUser] = useState(null);
             const [activeTab, setActiveTab] = useState('calendar');
             const [currentDate, setCurrentDate] = useState(new Date(2026, 2, 1));
@@ -165,16 +186,11 @@
                 return counters;
             }, [seasonEvents]);
 
-            // 1. 인증 로직 (Rule 3 강화: 익명 로그인 대기)
+            // 1. 인증 로직 (권한 오류 해결 핵심)
             useEffect(() => {
-                if (!hasFirebase) return;
                 const initAuth = async () => {
                     try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await auth.signInWithCustomToken(__initial_auth_token);
-                        } else {
-                            await auth.signInAnonymously();
-                        }
+                        if (!auth.currentUser) await auth.signInAnonymously();
                     } catch (e) { console.error("Auth Init Error:", e); }
                 };
                 initAuth();
@@ -182,33 +198,28 @@
                 return () => unsub();
             }, []);
 
-            // 2. 인증 완료 후 데이터 리스너 설정 (Rule 1 & 3 강화)
+            // 2. 리스너 가동 (유저 인증 및 DB 존재 확인)
             useEffect(() => {
                 if (!user || !db) return;
 
                 const eventsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events');
                 const unsubEvents = eventsRef.onSnapshot((snap) => {
                     setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                }, (error) => {
-                    console.error("Firestore Permission Error:", error);
-                });
+                }, (error) => console.error("Firestore Error:", error));
 
                 const fetchSettings = async () => {
                     try {
-                        const settingsRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('settings').doc('view');
-                        const snap = await settingsRef.get();
+                        const snap = await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('settings').doc('view').get();
                         if (snap.exists && snap.data().lastMonth) setCurrentDate(new Date(snap.data().lastMonth));
                     } catch (e) {}
                 };
                 fetchSettings();
-
                 return () => unsubEvents();
             }, [user]);
 
             useEffect(() => {
                 if (user && db) {
-                    db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('settings').doc('view')
-                      .set({ lastMonth: currentDate.toISOString() }, { merge: true });
+                    db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('settings').doc('view').set({ lastMonth: currentDate.toISOString() }, { merge: true });
                 }
             }, [currentDate, user]);
 
@@ -232,7 +243,7 @@
                 return w;
             }, [currentDate]);
 
-            // --- 데이터 핸들러 (날짜 ID 기반 Merge 전략) ---
+            // --- 데이터 로직 (날짜를 ID로 사용하는 Merge 방식) ---
             const getEventRef = (dateStr) => db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events').doc(dateStr);
 
             const toggleAct = async (dStr, cur, f) => {
@@ -249,16 +260,13 @@
                 const isKinder = formData.schoolType === '유치원';
 
                 const data = { 
-                    schoolName: base + suffix,
-                    schoolType: formData.schoolType,
+                    schoolName: base + suffix, schoolType: formData.schoolType,
                     selectedGrades: isKinder ? [] : formData.selectedGrades,
                     classNum: isKinder ? '-' : formData.classNum,
                     startTime: startTimeOptions[formData.startTimeIdx], 
                     endTime: endTimeOptions[formData.endTimeIdx], 
-                    people: formData.people,
-                    note: formData.note,
-                    date: selectedDate, 
-                    updatedAt: new Date().toISOString() 
+                    people: formData.people, note: formData.note,
+                    date: selectedDate, updatedAt: new Date().toISOString() 
                 };
                 
                 await getEventRef(selectedDate).set(data, { merge: true });
@@ -267,7 +275,6 @@
 
             const deleteConfirmed = async () => {
                 if (!user || !selectedDate) return;
-                // 학교 정보 필드만 삭제
                 await getEventRef(selectedDate).update({
                     schoolName: firebase.firestore.FieldValue.delete(),
                     schoolType: firebase.firestore.FieldValue.delete(),
@@ -288,38 +295,22 @@
                 e.preventDefault();
                 e.currentTarget.classList.remove('drop-target');
                 if (!draggedDate || !user || !db || draggedDate === targetDate) return;
-
                 const sourceData = events.find(ev => ev.date === draggedDate);
                 const targetData = events.find(ev => ev.date === targetDate);
-
-                if (targetData && targetData.schoolName) {
-                    alert("해당 날짜에 이미 등록된 학교 일정이 있습니다."); return;
-                }
-
-                // 이동할 정보 추출 (학교 관련만)
+                if (targetData && targetData.schoolName) { alert("해당 날짜에 이미 학교 일정이 있습니다."); return; }
                 const moveData = {
-                    schoolName: sourceData.schoolName,
-                    schoolType: sourceData.schoolType,
-                    selectedGrades: sourceData.selectedGrades,
-                    classNum: sourceData.classNum,
-                    people: sourceData.people,
-                    note: sourceData.note,
-                    startTime: sourceData.startTime,
-                    endTime: sourceData.endTime,
-                    date: targetDate,
-                    updatedAt: new Date().toISOString()
+                    schoolName: sourceData.schoolName, schoolType: sourceData.schoolType,
+                    selectedGrades: sourceData.selectedGrades, classNum: sourceData.classNum,
+                    people: sourceData.people, note: sourceData.note,
+                    startTime: sourceData.startTime, endTime: sourceData.endTime,
+                    date: targetDate, updatedAt: new Date().toISOString()
                 };
-
                 await getEventRef(targetDate).set(moveData, { merge: true });
                 await getEventRef(draggedDate).update({
-                    schoolName: firebase.firestore.FieldValue.delete(),
-                    schoolType: firebase.firestore.FieldValue.delete(),
-                    selectedGrades: firebase.firestore.FieldValue.delete(),
-                    classNum: firebase.firestore.FieldValue.delete(),
-                    people: firebase.firestore.FieldValue.delete(),
-                    note: firebase.firestore.FieldValue.delete(),
-                    startTime: firebase.firestore.FieldValue.delete(),
-                    endTime: firebase.firestore.FieldValue.delete()
+                    schoolName: firebase.firestore.FieldValue.delete(), schoolType: firebase.firestore.FieldValue.delete(),
+                    selectedGrades: firebase.firestore.FieldValue.delete(), classNum: firebase.firestore.FieldValue.delete(),
+                    people: firebase.firestore.FieldValue.delete(), note: firebase.firestore.FieldValue.delete(),
+                    startTime: firebase.firestore.FieldValue.delete(), endTime: firebase.firestore.FieldValue.delete()
                 });
                 setDraggedDate(null);
             };
@@ -334,13 +325,7 @@
                 if (!copiedEvent || !user || !db) return;
                 const existing = events.find(ev => ev.date === targetDate);
                 if (existing && existing.schoolName) { alert("이 날짜에 이미 학교 일정이 있습니다."); return; }
-                
-                const pasteData = {
-                    ...copiedEvent,
-                    id: undefined,
-                    date: targetDate,
-                    updatedAt: new Date().toISOString()
-                };
+                const pasteData = { ...copiedEvent, id: undefined, date: targetDate, updatedAt: new Date().toISOString() };
                 await getEventRef(targetDate).set(pasteData, { merge: true });
                 setContextMenu(null);
             };
@@ -496,8 +481,8 @@
                             <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border">
                                 <div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500"><Icon name="alert" size={32} /></div>
                                 <h3 className="text-xl font-black text-slate-900 mb-2">삭제할까요?</h3>
-                                <p className="text-slate-500 text-sm font-bold mb-8">학교 관련 정보만 삭제됩니다.</p>
-                                <div className="flex gap-3">
+                                <p className="text-slate-500 text-sm font-bold mb-8 text-center leading-tight">선택한 날짜의 학교 관련 정보만 삭제됩니다.</p>
+                                <div className="flex gap-3 mt-4">
                                     <button onClick={() => setIsDeleteConfirmOpen(false)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200">취소</button>
                                     <button onClick={deleteConfirmed} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black hover:bg-red-600 shadow-lg">삭제 확정</button>
                                 </div>
@@ -511,7 +496,7 @@
                             <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
                                 <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shadow-sm">
                                     <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2"><Icon name="check" size={18} className="text-blue-600" /> 학교 일정 관리</h2>
-                                    <button onClick={closeModal} className="p-1 hover:bg-slate-200 rounded-full active:scale-90"><Icon name="x" size={20} /></button>
+                                    <button onClick={closeModal} className="p-1 hover:bg-slate-200 rounded-full active:scale-90 transition-all"><Icon name="x" size={20} /></button>
                                 </div>
                                 <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar text-sm">
                                     <div className="bg-blue-50 px-3 py-2 rounded-xl text-blue-700 text-xs font-black flex justify-between shrink-0"><span>{selectedDate}</span><span className="opacity-60 underline tracking-tighter">공용 편집 모드</span></div>
