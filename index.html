@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JGC 통합 일정 관리 시스템</title>
+    <title>2026 통합 일정 관리 시스템</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & Babel -->
@@ -40,6 +40,10 @@
         }
 
         @media print {
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
             @page { size: A4 landscape; margin: 0.5cm; }
             html, body { height: auto !important; overflow: visible !important; background: white !important; }
             .print\:hidden { display: none !important; }
@@ -618,7 +622,7 @@
                                                                     )
                                                                 )}
 
-                                                                <div className="hidden md:flex flex-wrap gap-x-1 gap-y-0.5 z-10 shrink-0 mt-0.5 pointer-events-none">
+                                                                <div className="hidden md:flex print:flex flex-wrap gap-x-1 gap-y-0.5 z-10 shrink-0 mt-0.5 pointer-events-none">
                                                                     {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-1 rounded truncate border border-emerald-200">[{sessionCounters.isAfterSchoolEnglish[dStr]}] {settings.isAfterSchoolEnglish.name}</div>}
                                                                     {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded truncate border border-amber-200">[{sessionCounters.isChineseOnline[dStr]}] {settings.isChineseOnline.name}</div>}
                                                                     {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="text-[8px] font-black text-purple-700 bg-purple-50 px-1 rounded truncate border border-purple-200">[{sessionCounters.isEnglishOnline[dStr]}] {settings.isEnglishOnline.name}</div>}
