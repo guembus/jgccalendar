@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>2026 통합 일정 관리 시스템</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -13,7 +13,6 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
         
-        /* 전체 화면 고정 및 스크롤 방지 */
         html, body { 
             height: 100%; 
             margin: 0; 
@@ -21,24 +20,24 @@
             overflow: hidden; 
             font-family: 'Pretendard', sans-serif;
             background-color: #f1f5f9;
+            touch-action: none;
         }
 
-        #root { 
-            height: 100%; 
-            display: flex; 
-            flex-direction: column; 
-        }
+        #root { height: 100%; display: flex; flex-direction: column; }
 
-        /* 슬라이더 스타일 */
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #2563eb; cursor: pointer; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         
-        /* 커스텀 스크롤바 */
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 
-        /* 드래그 상태 시각화 */
         .dragging { opacity: 0.5; border: 2px dashed #2563eb !important; }
         .drop-target { background-color: #eff6ff !important; border: 2px solid #3b82f6 !important; }
+
+        @media (max-width: 767px) {
+            .marquee-container { display: flex; overflow: hidden; white-space: nowrap; width: 100%; }
+            .marquee-text { display: inline-block; padding-left: 100%; animation: marquee 5s linear infinite; }
+            @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+        }
 
         @media print {
             @page { size: A4 landscape; margin: 0.5cm; }
@@ -46,27 +45,23 @@
             .print\:hidden { display: none !important; }
             main { padding: 0 !important; margin: 0 !important; width: 100% !important; height: auto !important; }
             .calendar-container { border: 1.5px solid #000 !important; height: auto !important; }
-            .calendar-cell { min-height: 120px !important; border: 1px solid #000 !important; }
-            .bg-blue-600 { background-color: #1d4ed8 !important; color: white !important; }
         }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
-    <!-- Firebase SDK (Compat) -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot, updateDoc, deleteField } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo, Fragment, useRef } = React;
+        const { useState, useEffect, useMemo, useRef, Fragment } = React;
 
-        // ================================================================
-        // [필독] 여기에 본인의 파이어베이스 정보를 복사해서 붙여넣으세요!
-        // 파이어베이스 콘솔 -> 프로젝트 설정 -> 내 앱 -> firebaseConfig 객체 내용
-        // ================================================================
-        const firebaseConfig = {
+        // ============================================================================
+        // ⭐️⭐️⭐️ 파이어베이스 환경 설정 (FIREBASE CONFIGURATION) ⭐️⭐️⭐️
+        // ============================================================================
+        const myFirebaseConfig = {
             apiKey: "AIzaSyDcgyT68OxF6AvkOqStl3fl-1iqZaQ-uoY",
             authDomain: "jgccalendar-d84b6.firebaseapp.com",
             projectId: "jgccalendar-d84b6",
@@ -74,79 +69,79 @@
             messagingSenderId: "797056526732",
             appId: "1:797056526732:web:b53ddf064101b1cc1fcea9"
         };
-        // ================================================================
-
-        // 초기화 가드
-        const hasValidConfig = firebaseConfig.apiKey && firebaseConfig.apiKey.length > 0;
-        if (hasValidConfig && !firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-        const auth = hasValidConfig ? firebase.auth() : null;
-        const db = hasValidConfig ? firebase.firestore() : null;
+        
+        // 미리보기 환경과 사자비 님의 실제 배포 환경 모두에서 작동하도록 안전 장치 적용
+        const finalConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : myFirebaseConfig;
+        
+        const app = initializeApp(finalConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'program-manager-2026';
+        // ============================================================================
 
-        // 아이콘 렌더러
         const Icon = ({ name, size = 16, className = "" }) => {
             const icons = {
-                calendar: <Fragment><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /></Fragment>,
-                plus: <Fragment><path d="M12 5v14M5 12h14" /></Fragment>,
-                x: <Fragment><path d="M18 6 6 18M6 6l12 12" /></Fragment>,
-                chevronLeft: <Fragment><path d="m15 18-6-6 6-6" /></Fragment>,
-                chevronRight: <Fragment><path d="m9 18 6-6-6-6" /></Fragment>,
-                printer: <Fragment><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z" /></Fragment>,
-                trash: <Fragment><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" /></Fragment>,
-                star: <Fragment><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></Fragment>,
-                users: <Fragment><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></Fragment>,
-                globe: <Fragment><circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></Fragment>,
-                book: <Fragment><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5V4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5z" /></Fragment>,
-                alert: <Fragment><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></Fragment>,
-                check: <Fragment><path d="M20 6 9 17l-5-5" /></Fragment>,
-                layout: <Fragment><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18M9 21V9" /></Fragment>,
-                list: <Fragment><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></Fragment>,
-                clock: <Fragment><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Fragment>,
-                copy: <Fragment><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></Fragment>
+                calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+                plus: 'M12 5v14M5 12h14',
+                x: 'M18 6 6 18M6 6l12 12',
+                chevronLeft: 'm15 18-6-6 6-6',
+                chevronRight: 'm9 18 6-6-6-6',
+                printer: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',
+                trash: 'M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6',
+                star: 'm12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+                users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+                globe: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-20c.535 0 1.056.042 1.564.122A14.975 14.975 0 0115.82 12a14.975 14.975 0 01-2.256 9.878A9.975 9.975 0 0112 22a9.975 9.975 0 01-1.564-.122A14.975 14.975 0 008.18 12a14.975 14.975 0 002.256-9.878A9.975 9.975 0 0112 2zm-8.9 9.1h17.8M3.1 14.9h17.8',
+                book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5V4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5z',
+                alert: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-14v4m0 4h.01',
+                check: 'M20 6 9 17l-5-5',
+                layout: 'M3 3h18v18H3V3zm0 6h18M9 9v12',
+                list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+                clock: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-16v6l4 2',
+                copy: 'M8 8H4v12h12v-4M16 4H8v12h12V4h-4z',
+                settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 1 0-6 3 3 0 0 1 0 6z',
+                edit: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                    {icons[name] || null}
+                    <path d={icons[name] || ""} />
                 </svg>
             );
         };
 
-        const App = () => {
-            // 설정 누락 시 안내 화면
-            if (!hasValidConfig) {
-                return (
-                    <div className="flex items-center justify-center h-screen bg-slate-900 text-white p-8 text-center">
-                        <div className="max-w-md bg-slate-800 p-8 rounded-[40px] shadow-2xl border border-slate-700">
-                            <Icon name="alert" size={64} className="mx-auto text-amber-400 mb-6" />
-                            <h1 className="text-2xl font-black mb-4">Firebase 설정이 비어있습니다</h1>
-                            <p className="text-slate-400 text-sm leading-relaxed mb-8 text-left">
-                                index.html 파일을 열고 <b>70번 라인 근처</b>에 있는 <code className="bg-slate-900 px-1 rounded text-blue-400">firebaseConfig</code> 객체 안의 빈 칸들을 본인의 정보로 채워주세요.
-                            </p>
-                            <div className="bg-slate-900 p-4 rounded-2xl text-xs font-mono text-left opacity-50">
-                                const firebaseConfig = &#123;<br/>
-                                &nbsp;&nbsp;apiKey: "여기에 입력",<br/>
-                                &nbsp;&nbsp;...<br/>
-                                &#125;;
-                            </div>
-                        </div>
-                    </div>
-                );
-            }
+        const defaultSettings = {
+            isAfterSchoolEnglish: { name: '방과후 영어', days: [1, 5] },
+            isChineseOnline: { name: '중국어 온라인', days: [3] },
+            isEnglishOnline: { name: '영어 온라인', days: [2, 4, 5] },
+            isSpecialLecture: { name: '토요특강', days: [6] }
+        };
 
+        const App = () => {
             const [user, setUser] = useState(null);
             const [activeTab, setActiveTab] = useState('calendar');
             const [currentDate, setCurrentDate] = useState(new Date(2026, 2, 1));
             const [events, setEvents] = useState([]);
+            const [settings, setSettings] = useState(defaultSettings);
+            
+            // 모달 관리
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+            const [detailModalData, setDetailModalData] = useState(null); 
+            
+            // 설정 모달 상태
+            const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+            const [tempSettings, setTempSettings] = useState(defaultSettings);
+            const [editingKey, setEditingKey] = useState(null);
+            const [pendingSettingsSave, setPendingSettingsSave] = useState(null);
+            
             const [selectedDate, setSelectedDate] = useState(null);
             const [editingEvent, setEditingEvent] = useState(null);
-
             const [copiedEvent, setCopiedEvent] = useState(null);
             const [contextMenu, setContextMenu] = useState(null);
             const [draggedDate, setDraggedDate] = useState(null);
+            
+            const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+            const wheelTimeout = useRef(null);
+            const touchStart = useRef(null);
 
             const initialForm = { schoolType: '초등학교', schoolName: '', selectedGrades: ['3'], classNum: '-', kinderClass: '', startTimeIdx: 3, endTimeIdx: 6, people: '20', note: '' };
             const [formData, setFormData] = useState(initialForm);
@@ -164,7 +159,7 @@
             const season = useMemo(() => {
                 const y = currentDate.getFullYear(), m = currentDate.getMonth();
                 const sYear = m < 2 ? y - 1 : y;
-                return { startStr: `${sYear}-03-01`, endStr: `${sYear + 1}-02-29`, label: `${sYear}학년도` };
+                return { startStr: `${sYear}-03-01`, endStr: `${sYear + 1}-02-29`, label: `${sYear}학년도`, year: sYear.toString() };
             }, [currentDate]);
 
             const seasonEvents = useMemo(() => events.filter(e => e.date >= season.startStr && e.date <= season.endStr), [events, season]);
@@ -186,42 +181,50 @@
                 return counters;
             }, [seasonEvents]);
 
-            // 1. 인증 로직 (권한 오류 해결 핵심)
+            useEffect(() => {
+                const handleResize = () => setIsMobile(window.innerWidth < 768);
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
+
             useEffect(() => {
                 const initAuth = async () => {
                     try {
-                        if (!auth.currentUser) await auth.signInAnonymously();
-                    } catch (e) { console.error("Auth Init Error:", e); }
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) { console.error("Auth Error", e); }
                 };
                 initAuth();
-                const unsub = auth.onAuthStateChanged((u) => setUser(u));
+                const unsub = onAuthStateChanged(auth, setUser);
                 return () => unsub();
             }, []);
 
-            // 2. 리스너 가동 (유저 인증 및 DB 존재 확인)
+            // 이벤트 데이터 구독
             useEffect(() => {
-                if (!user || !db) return;
-
-                const eventsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events');
-                const unsubEvents = eventsRef.onSnapshot((snap) => {
+                if (!user) return;
+                const eventsRef = collection(db, 'artifacts', appId, 'public', 'data', 'events');
+                const unsub = onSnapshot(eventsRef, (snap) => {
                     setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                }, (error) => console.error("Firestore Error:", error));
-
-                const fetchSettings = async () => {
-                    try {
-                        const snap = await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('settings').doc('view').get();
-                        if (snap.exists && snap.data().lastMonth) setCurrentDate(new Date(snap.data().lastMonth));
-                    } catch (e) {}
-                };
-                fetchSettings();
-                return () => unsubEvents();
+                });
+                return () => unsub();
             }, [user]);
 
+            // 설정 데이터 구독 (연도별)
             useEffect(() => {
-                if (user && db) {
-                    db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('settings').doc('view').set({ lastMonth: currentDate.toISOString() }, { merge: true });
-                }
-            }, [currentDate, user]);
+                if (!user) return;
+                const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', season.year);
+                const unsubSettings = onSnapshot(settingsRef, (snap) => {
+                    if (snap.exists()) {
+                        setSettings({ ...defaultSettings, ...snap.data() });
+                    } else {
+                        setSettings(defaultSettings);
+                    }
+                });
+                return () => unsubSettings();
+            }, [user, season.year]);
 
             useEffect(() => {
                 const closeMenu = () => setContextMenu(null);
@@ -238,66 +241,122 @@
                 const w = [];
                 for (let i = 0; i < d.length; i += 7) {
                     const week = d.slice(i, i + 7);
-                    w.push([ week[0]||null, week[1]||null, week[2]||null, week[3]||null, week[4]||null, {sat: week[5]||null, sun: week[6]||null} ]);
+                    while (week.length < 7) week.push(null);
+                    w.push([ week[0], week[1], week[2], week[3], week[4], {sat: week[5], sun: week[6]} ]);
                 }
                 return w;
             }, [currentDate]);
 
-            // --- 데이터 로직 (날짜를 ID로 사용하는 Merge 방식) ---
-            const getEventRef = (dateStr) => db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events').doc(dateStr);
+            const handleTouchStart = (e) => { touchStart.current = e.touches[0].clientX; };
+            const handleTouchEnd = (e) => {
+                if (!touchStart.current) return;
+                const diff = touchStart.current - e.changedTouches[0].clientX;
+                if (Math.abs(diff) > 50) {
+                    setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + (diff > 0 ? 1 : -1), 1));
+                }
+                touchStart.current = null;
+            };
+
+            const handleWheel = (e) => {
+                if (isMobile || wheelTimeout.current || Math.abs(e.deltaY) < 10) return;
+                setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + (e.deltaY > 0 ? 1 : -1), 1));
+                wheelTimeout.current = setTimeout(() => { wheelTimeout.current = null; }, 300);
+            };
+
+            const getEventDocRef = (dateStr) => doc(db, 'artifacts', appId, 'public', 'data', 'events', dateStr);
 
             const toggleAct = async (dStr, cur, f) => {
-                if (!user || !db) return;
+                if (!user || isMobile) return; 
                 const data = cur ? { [f]: !cur[f] } : { [f]: true, date: dStr };
-                await getEventRef(dStr).set(data, { merge: true });
+                await setDoc(getEventDocRef(dStr), data, { merge: true });
             };
+
+            // ====== 설정 저장 관련 로직 ======
+            const openSettingsModal = () => {
+                setTempSettings(JSON.parse(JSON.stringify(settings)));
+                setEditingKey(null);
+                setIsSettingsModalOpen(true);
+            };
+
+            const requestSettingsSave = () => {
+                const changed = [];
+                Object.keys(defaultSettings).forEach(k => {
+                    if (settings[k].name !== tempSettings[k].name || JSON.stringify(settings[k].days) !== JSON.stringify(tempSettings[k].days)) {
+                        changed.push(k);
+                    }
+                });
+
+                if (changed.length > 0) {
+                    setPendingSettingsSave({ newSettings: tempSettings, changedKeys: changed });
+                } else {
+                    setIsSettingsModalOpen(false); // 변경사항 없으면 그냥 닫기
+                }
+            };
+
+            const confirmSettingsSave = async () => {
+                if (!pendingSettingsSave || !user) return;
+                const { newSettings, changedKeys } = pendingSettingsSave;
+                
+                // 설정값 Firestore에 저장
+                const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', season.year);
+                await setDoc(settingsRef, newSettings, { merge: true });
+
+                // 변경된 항목의 기존 일정 플래그를 모두 제거 (deleteField 활용)
+                for (const key of changedKeys) {
+                    const eventsToClear = seasonEvents.filter(ev => ev[key] === true);
+                    for (const ev of eventsToClear) {
+                        await updateDoc(getEventDocRef(ev.date), { [key]: deleteField() });
+                    }
+                }
+
+                setPendingSettingsSave(null);
+                setIsSettingsModalOpen(false);
+            };
+
+            const toggleTempDay = (key, dayInt) => {
+                setTempSettings(prev => {
+                    const currentDays = prev[key].days;
+                    const newDays = currentDays.includes(dayInt) ? currentDays.filter(d => d !== dayInt) : [...currentDays, dayInt].sort();
+                    return { ...prev, [key]: { ...prev[key], days: newDays } };
+                });
+            };
+            // =================================
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!user || !db) return;
+                if (!user) return;
                 const suffix = formData.schoolType === '유치원' ? '유' : formData.schoolType === '초등학교' ? '초' : '중';
                 let base = formData.schoolName.trim().replace(/(초등학교|중학교|유치원|초|중|유)$/, '');
                 const isKinder = formData.schoolType === '유치원';
 
                 const data = { 
                     schoolName: base + suffix, schoolType: formData.schoolType,
-                    selectedGrades: isKinder ? [] : formData.selectedGrades,
-                    classNum: isKinder ? '-' : formData.classNum,
-                    startTime: startTimeOptions[formData.startTimeIdx], 
-                    endTime: endTimeOptions[formData.endTimeIdx], 
-                    people: formData.people, note: formData.note,
-                    date: selectedDate, updatedAt: new Date().toISOString() 
+                    selectedGrades: isKinder ? [] : formData.selectedGrades, classNum: isKinder ? '-' : formData.classNum,
+                    startTime: startTimeOptions[formData.startTimeIdx], endTime: endTimeOptions[formData.endTimeIdx], 
+                    people: formData.people, note: formData.note, date: selectedDate, updatedAt: new Date().toISOString() 
                 };
-                
-                await getEventRef(selectedDate).set(data, { merge: true });
+                await setDoc(getEventDocRef(selectedDate), data, { merge: true });
                 closeModal();
             };
 
             const deleteConfirmed = async () => {
                 if (!user || !selectedDate) return;
-                await getEventRef(selectedDate).update({
-                    schoolName: firebase.firestore.FieldValue.delete(),
-                    schoolType: firebase.firestore.FieldValue.delete(),
-                    selectedGrades: firebase.firestore.FieldValue.delete(),
-                    classNum: firebase.firestore.FieldValue.delete(),
-                    people: firebase.firestore.FieldValue.delete(),
-                    note: firebase.firestore.FieldValue.delete(),
-                    startTime: firebase.firestore.FieldValue.delete(),
-                    endTime: firebase.firestore.FieldValue.delete()
+                await updateDoc(getEventDocRef(selectedDate), {
+                    schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(), classNum: deleteField(),
+                    people: deleteField(), note: deleteField(), startTime: deleteField(), endTime: deleteField()
                 });
                 setIsDeleteConfirmOpen(false); closeModal();
             };
 
-            const handleDragStart = (e, date) => { setDraggedDate(date); e.currentTarget.classList.add('dragging'); };
-            const handleDragEnd = (e) => { e.currentTarget.classList.remove('dragging'); };
-
+            const handleDragStart = (e, date) => { if (isMobile) return; setDraggedDate(date); e.currentTarget.classList.add('dragging'); };
+            const handleDragEnd = (e) => { if (isMobile) return; e.currentTarget.classList.remove('dragging'); };
             const handleDrop = async (e, targetDate) => {
-                e.preventDefault();
-                e.currentTarget.classList.remove('drop-target');
-                if (!draggedDate || !user || !db || draggedDate === targetDate) return;
+                e.preventDefault(); e.currentTarget.classList.remove('drop-target');
+                if (isMobile || !draggedDate || !user || draggedDate === targetDate) return;
                 const sourceData = events.find(ev => ev.date === draggedDate);
                 const targetData = events.find(ev => ev.date === targetDate);
                 if (targetData && targetData.schoolName) { alert("해당 날짜에 이미 학교 일정이 있습니다."); return; }
+                
                 const moveData = {
                     schoolName: sourceData.schoolName, schoolType: sourceData.schoolType,
                     selectedGrades: sourceData.selectedGrades, classNum: sourceData.classNum,
@@ -305,29 +364,36 @@
                     startTime: sourceData.startTime, endTime: sourceData.endTime,
                     date: targetDate, updatedAt: new Date().toISOString()
                 };
-                await getEventRef(targetDate).set(moveData, { merge: true });
-                await getEventRef(draggedDate).update({
-                    schoolName: firebase.firestore.FieldValue.delete(), schoolType: firebase.firestore.FieldValue.delete(),
-                    selectedGrades: firebase.firestore.FieldValue.delete(), classNum: firebase.firestore.FieldValue.delete(),
-                    people: firebase.firestore.FieldValue.delete(), note: firebase.firestore.FieldValue.delete(),
-                    startTime: firebase.firestore.FieldValue.delete(), endTime: firebase.firestore.FieldValue.delete()
+                await setDoc(getEventDocRef(targetDate), moveData, { merge: true });
+                await updateDoc(getEventDocRef(draggedDate), {
+                    schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(), classNum: deleteField(),
+                    people: deleteField(), note: deleteField(), startTime: deleteField(), endTime: deleteField()
                 });
                 setDraggedDate(null);
             };
+            const handleDragOver = (e) => { if (isMobile) return; e.preventDefault(); e.currentTarget.classList.add('drop-target'); };
+            const handleDragLeave = (e) => { if (isMobile) return; e.currentTarget.classList.remove('drop-target'); };
 
-            const handleDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('drop-target'); };
-            const handleDragLeave = (e) => e.currentTarget.classList.remove('drop-target');
-
-            const handleContextMenu = (e, date, ev = null) => { e.preventDefault(); setContextMenu({ x: e.pageX, y: e.pageY, date: date, event: ev }); };
+            const handleContextMenu = (e, date, ev = null) => { 
+                if (isMobile) return; 
+                e.preventDefault(); 
+                setContextMenu({ x: e.pageX, y: e.pageY, date: date, event: ev }); 
+            };
             const copyEvent = (ev) => { if (!ev || !ev.schoolName) return; setCopiedEvent(ev); setContextMenu(null); };
 
             const pasteEvent = async (targetDate) => {
-                if (!copiedEvent || !user || !db) return;
+                if (!copiedEvent || !user) return;
                 const existing = events.find(ev => ev.date === targetDate);
                 if (existing && existing.schoolName) { alert("이 날짜에 이미 학교 일정이 있습니다."); return; }
                 const pasteData = { ...copiedEvent, id: undefined, date: targetDate, updatedAt: new Date().toISOString() };
-                await getEventRef(targetDate).set(pasteData, { merge: true });
+                await setDoc(getEventDocRef(targetDate), pasteData, { merge: true });
                 setContextMenu(null);
+            };
+
+            const handleCellClick = (dStr, ev) => {
+                if (!dStr) return;
+                if (isMobile) setDetailModalData({ date: dStr, event: ev || {} });
+                else openModal(dStr, ev);
             };
 
             const openModal = (d, ev = null) => {
@@ -342,89 +408,139 @@
 
             const closeModal = () => { setIsModalOpen(false); setEditingEvent(null); };
 
+            if (!user) return <div className="h-full flex items-center justify-center bg-slate-50 text-slate-400 font-bold">인증 중...</div>;
+
             return (
                 <Fragment>
                     <header className="flex-none p-2 md:px-6 flex justify-between items-center print:hidden border-b border-slate-200 bg-white h-14 shrink-0 shadow-sm z-10">
                         <div className="flex items-center gap-3">
-                            <div className="bg-slate-900 p-2 rounded-lg text-white shadow-md"><Icon name="calendar" size={16} /></div>
-                            <div className="flex flex-col">
+                            <div className="hidden md:block bg-slate-900 p-2 rounded-lg text-white shadow-md"><Icon name="calendar" size={16} /></div>
+                            <div className="hidden md:flex flex-col">
                                 <h1 className="text-xs font-black text-slate-800 uppercase tracking-tight leading-none mb-1">PROGRAM MANAGER</h1>
                                 <span className="text-[10px] font-bold text-blue-600 leading-none">{season.label}</span>
                             </div>
-                            <nav className="flex bg-slate-100 p-1 rounded-xl ml-4">
+                            <nav className="flex bg-slate-100 p-1 rounded-xl md:ml-4">
                                 <button onClick={() => setActiveTab('calendar')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${activeTab === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}><Icon name="layout" size={14}/> 달력</button>
                                 <button onClick={() => setActiveTab('list')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${activeTab === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}><Icon name="list" size={14}/> 명단</button>
                             </nav>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-xl border border-slate-200 shadow-inner">
-                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1 hover:bg-slate-50"><Icon name="chevronLeft" size={16} /></button>
-                                <div className="px-2 font-black text-sm min-w-[90px] text-center">{currentDate.getFullYear()}.{String(currentDate.getMonth() + 1).padStart(2, '0')}</div>
-                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-1 hover:bg-slate-50"><Icon name="chevronRight" size={16} /></button>
+                                {/* PC 전용 톱니바퀴 설정 아이콘 */}
+                                {!isMobile && (
+                                    <button onClick={openSettingsModal} className="p-1 hover:bg-slate-100 text-slate-600 mr-1 border-r border-slate-200 pr-2 transition-colors">
+                                        <Icon name="settings" size={16} />
+                                    </button>
+                                )}
+                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1 hover:bg-slate-50 text-slate-700"><Icon name="chevronLeft" size={16} /></button>
+                                <div className="px-2 font-black text-sm min-w-[90px] text-center text-slate-900">{currentDate.getFullYear()}.{String(currentDate.getMonth() + 1).padStart(2, '0')}</div>
+                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-1 hover:bg-slate-50 text-slate-700"><Icon name="chevronRight" size={16} /></button>
                             </div>
-                            <button onClick={() => window.print()} className="bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-[11px] shadow-sm hover:bg-black transition-all">PRINT</button>
+                            <button onClick={() => window.print()} className="hidden md:block bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-[11px] shadow-sm hover:bg-black transition-all">PRINT</button>
                         </div>
                     </header>
 
-                    <main className="flex-1 flex flex-col p-2 min-h-0">
+                    <main className="flex-1 flex flex-col p-1 md:p-2 min-h-0" onWheel={handleWheel} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
                         {activeTab === 'calendar' ? (
                             <div className="flex-1 flex flex-col min-h-0 bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-300">
                                 <div className="flex-none grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] bg-slate-900 border-b border-slate-800">
-                                    {['월', '화', '수', '목', '금', '토/일'].map(day => <div key={day} className={`py-2 text-center text-[11px] font-black ${day === '토/일' ? 'text-blue-300' : 'text-white'}`}>{day}요일</div>)}
+                                    {['월', '화', '수', '목', '금', '토/일'].map(day => <div key={day} className={`py-1.5 md:py-2 text-center text-[10px] md:text-[11px] font-black ${day === '토/일' ? 'text-blue-300' : 'text-white'}`}>{day}{isMobile ? '' : '요일'}</div>)}
                                 </div>
                                 <div className="flex-1 flex flex-col min-h-0">
                                     {calendarWeeks.map((week, wIdx) => (
                                         <div key={wIdx} className="flex-1 grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] border-b last:border-b-0 min-h-0">
                                             {week.map((cell, cIdx) => {
-                                                const isWe = cIdx === 5; const date = isWe ? cell.sat : cell;
+                                                const isWe = cIdx === 5; 
+                                                const date = isWe ? cell?.sat : cell;
                                                 const dStr = date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : null;
                                                 const ev = events.find(e => e.date === dStr);
                                                 const isToday = dStr === new Date().toISOString().split('T')[0];
                                                 const dow = date ? date.getDay() : -1;
 
+                                                // 설정값에 기반한 노출 여부 판단
+                                                const showItem1 = settings.isAfterSchoolEnglish.name && settings.isAfterSchoolEnglish.days.includes(dow) && !isWe;
+                                                const showItem2 = settings.isChineseOnline.name && settings.isChineseOnline.days.includes(dow) && !isWe;
+                                                const showItem3 = settings.isEnglishOnline.name && settings.isEnglishOnline.days.includes(dow) && !isWe;
+                                                const showItem4 = settings.isSpecialLecture.name && isWe;
+
+                                                let dateColor = 'opacity-0';
+                                                let bgColor = 'bg-slate-50';
+                                                if (date) {
+                                                    bgColor = isToday ? 'bg-blue-50/50' : 'bg-white hover:bg-blue-50/10';
+                                                    if (isWe && ev?.isSpecialLecture && showItem4 && !isMobile) {
+                                                        bgColor = '!bg-blue-700'; dateColor = '!text-white';
+                                                    } else if (isWe) {
+                                                        bgColor = 'bg-slate-50/50'; dateColor = 'text-blue-500'; 
+                                                    } else if (isToday) {
+                                                        dateColor = 'text-blue-700'; 
+                                                    } else {
+                                                        dateColor = 'text-slate-700'; 
+                                                    }
+                                                }
+
                                                 return (
-                                                    <div 
-                                                        key={`${wIdx}-${cIdx}`} 
-                                                        onClick={() => dStr && !isWe && openModal(dStr, ev)} 
-                                                        onContextMenu={(e) => dStr && !isWe && handleContextMenu(e, dStr, ev)}
-                                                        onDragOver={dStr && !isWe ? handleDragOver : null}
-                                                        onDragLeave={handleDragLeave}
-                                                        onDrop={dStr && !isWe ? (e) => handleDrop(e, dStr) : null}
-                                                        className={`flex flex-col p-1 border-r last:border-r-0 transition-all cursor-pointer overflow-hidden ${!date ? 'bg-slate-50' : isToday ? 'bg-blue-50' : 'bg-white hover:bg-blue-50/10'} ${isWe && ev?.isSpecialLecture ? '!bg-blue-700' : isWe ? 'bg-slate-50/50' : ''}`}
-                                                    >
+                                                    <div key={`${wIdx}-${cIdx}`} onClick={() => !isWe && handleCellClick(dStr, ev)} onContextMenu={(e) => dStr && !isWe && handleContextMenu(e, dStr, ev)} onDragOver={dStr && !isWe ? handleDragOver : null} onDragLeave={handleDragLeave} onDrop={dStr && !isWe ? (e) => handleDrop(e, dStr) : null} className={`flex flex-col p-1 border-r last:border-r-0 transition-all ${isMobile ? '' : 'cursor-pointer'} overflow-hidden relative ${bgColor}`}>
                                                         <div className="flex justify-between items-start mb-0.5 shrink-0">
-                                                            <span className={`text-base font-black ${!date ? 'opacity-0' : (isWe && ev?.isSpecialLecture) ? '!text-white' : isToday ? 'text-blue-600' : isWe ? 'text-blue-400' : 'text-slate-300'}`}>{date?.getDate()}</span>
-                                                            {date && <div className="flex gap-0.5 print:hidden opacity-30 group-hover:opacity-100">
-                                                                {isWe && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isSpecialLecture'); }} className={`p-0.5 rounded ${ev?.isSpecialLecture ? 'text-yellow-400 bg-blue-800' : 'text-slate-300'}`}><Icon name="star" size={14} /></button>}
-                                                                {(dow === 1 || dow === 5) && !isWe && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isAfterSchoolEnglish'); }} className={`p-0.5 rounded ${ev?.isAfterSchoolEnglish ? 'text-emerald-600 bg-emerald-50 ring-1 ring-emerald-200' : 'text-slate-400'}`}><Icon name="book" size={14} /></button>}
-                                                                {dow === 3 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isChineseOnline'); }} className={`p-0.5 rounded ${ev?.isChineseOnline ? 'text-amber-600 bg-amber-50 ring-1 ring-amber-200' : 'text-slate-400'}`}><Icon name="globe" size={14} /></button>}
-                                                                {(dow === 2 || dow === 4 || dow === 5) && !isWe && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isEnglishOnline'); }} className={`p-0.5 rounded ${ev?.isEnglishOnline ? 'text-purple-600 bg-purple-50 ring-1 ring-purple-200' : 'text-slate-400'}`}><Icon name="globe" size={14} /></button>}
+                                                            <div className="flex items-center gap-1">
+                                                                <span className={`${isMobile && isWe ? 'text-[10px]' : isMobile ? 'text-xs' : 'text-base'} font-black ${dateColor}`}>{date?.getDate()}</span>
+                                                                {isMobile && ev?.note && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-sm mt-0.5"></div>}
+                                                            </div>
+                                                            {/* 설정된 요일에만 아이콘 렌더링 */}
+                                                            {date && <div className="hidden md:flex gap-0.5 print:hidden opacity-60 hover:opacity-100 transition-opacity">
+                                                                {showItem4 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isSpecialLecture'); }} className={`p-0.5 rounded ${ev?.isSpecialLecture ? 'text-yellow-400 bg-blue-800' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="star" size={14} /></button>}
+                                                                {showItem1 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isAfterSchoolEnglish'); }} className={`p-0.5 rounded ${ev?.isAfterSchoolEnglish ? 'text-emerald-600 bg-emerald-50 ring-1 ring-emerald-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="book" size={14} /></button>}
+                                                                {showItem2 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isChineseOnline'); }} className={`p-0.5 rounded ${ev?.isChineseOnline ? 'text-amber-600 bg-amber-50 ring-1 ring-amber-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="globe" size={14} /></button>}
+                                                                {showItem3 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isEnglishOnline'); }} className={`p-0.5 rounded ${ev?.isEnglishOnline ? 'text-purple-600 bg-purple-50 ring-1 ring-purple-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="globe" size={14} /></button>}
                                                             </div>}
                                                         </div>
+
                                                         {!isWe && ev && ev.schoolName && (
-                                                            <div draggable={true} onDragStart={(e) => handleDragStart(e, dStr)} onDragEnd={handleDragEnd} className="flex-1 min-h-0 overflow-hidden flex flex-col cursor-move">
-                                                                <div className="text-[17px] font-black text-slate-900 leading-none truncate mb-1">{ev.schoolName}</div>
-                                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-bold text-slate-500 mb-1 shrink-0">
-                                                                    <div className="flex items-center gap-0.5 shrink-0"><Icon name="clock" size={10} />{ev.startTime}~{ev.endTime}</div>
-                                                                    {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && (
-                                                                        <div className="flex items-center gap-0.5 text-blue-700 bg-blue-50 px-1 rounded shrink-0 font-black">
-                                                                            {ev.selectedGrades?.join(',')}학년{ev.selectedGrades?.length === 1 && ev.classNum !== '-' ? ` ${ev.classNum}반` : ''}
-                                                                        </div>
-                                                                    )}
-                                                                    <div className="flex items-center gap-0.5 text-emerald-600 font-black shrink-0"><Icon name="users" size={10} />{ev.people}명</div>
+                                                            isMobile ? (
+                                                                <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-0.5 pt-0.5 justify-start">
+                                                                    <div className={`text-slate-900 font-black text-[10px] leading-none ${ev.schoolName.length > 6 ? 'marquee-container w-full' : 'truncate'}`}><span className={ev.schoolName.length > 6 ? 'marquee-text' : ''}>{ev.schoolName}</span></div>
+                                                                    {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="text-blue-700 font-black text-[9px] leading-none truncate">{ev.selectedGrades?.length === 1 ? (ev.classNum !== '-' ? `${ev.selectedGrades[0]}-${ev.classNum}` : ev.selectedGrades[0]) : ev.selectedGrades?.join(',')}</div>}
                                                                 </div>
-                                                                <div className="text-[11px] text-red-600 font-black truncate mt-auto leading-tight border-t border-red-50 pt-0.5 shrink-0">{ev.note}</div>
+                                                            ) : (
+                                                                <div draggable={true} onDragStart={(e) => handleDragStart(e, dStr)} onDragEnd={handleDragEnd} className="flex-1 min-h-0 overflow-hidden flex flex-col cursor-move">
+                                                                    {/* 1. 학교명: 최상단 고정, 크기 유지(shrink-0), 약간의 여백(mb-1), 글자 하단 잘림 방지(pb-[1px]) */}
+                                                                    <div className="text-[17px] font-black text-slate-900 leading-none truncate shrink-0 mb-1 pb-[1px]">{ev.schoolName}</div>
+                                                                    
+                                                                    {/* 2. 하단 정보 그룹: mt-auto를 주어 바닥으로 밀어내고 내부 요소 밀집(gap-0.5) */}
+                                                                    <div className="mt-auto flex flex-col gap-0.5 shrink-0">
+                                                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-bold text-slate-500 shrink-0 text-[10px]">
+                                                                            <div className="flex items-center gap-0.5 shrink-0 text-slate-700"><Icon name="clock" size={10} />{ev.startTime}~{ev.endTime}</div>
+                                                                            {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="flex items-center gap-0.5 text-blue-700 bg-blue-50 px-1 rounded shrink-0 font-black">{ev.selectedGrades?.join(',')}학년{ev.selectedGrades?.length === 1 && ev.classNum !== '-' ? ` ${ev.classNum}반` : ''}</div>}
+                                                                            <div className="flex items-center gap-0.5 text-emerald-600 font-black shrink-0"><Icon name="users" size={10} />{ev.people}명</div>
+                                                                        </div>
+                                                                        {ev.note ? (
+                                                                            <div className="text-[11px] text-red-600 font-black truncate leading-tight border-t border-red-50 pt-0.5">{ev.note}</div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        )}
+
+                                                        {/* 3. 하단 토글 배지: 특이사항 바로 아래에 붙도록 mt-0.5 적용, 밀집(gap-y-0.5) */}
+                                                        <div className="hidden md:flex flex-wrap gap-x-1 gap-y-0.5 z-10 shrink-0 mt-0.5">
+                                                            {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-1 rounded truncate border border-emerald-200">[{sessionCounters.isAfterSchoolEnglish[dStr]}] {settings.isAfterSchoolEnglish.name}</div>}
+                                                            {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded truncate border border-amber-200">[{sessionCounters.isChineseOnline[dStr]}] {settings.isChineseOnline.name}</div>}
+                                                            {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="text-[8px] font-black text-purple-700 bg-purple-50 px-1 rounded truncate border border-purple-200">[{sessionCounters.isEnglishOnline[dStr]}] {settings.isEnglishOnline.name}</div>}
+                                                            {isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && showItem4 && ( <div className="w-full text-white font-black text-center text-[12px] leading-tight py-4 drop-shadow-md">{settings.isSpecialLecture.name}<br/><span className="text-yellow-300">({sessionCounters.isSpecialLecture[dStr]}회)</span></div> )}
+                                                        </div>
+
+                                                        {/* 모바일 뷰어용 간소화된 마커 */}
+                                                        {isMobile && isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && (
+                                                            <div className="flex-1 flex items-center justify-center"><div className="text-blue-600 font-black text-[15px] bg-blue-50 w-full text-center py-1 rounded">토</div></div>
+                                                        )}
+                                                        {isMobile && !isWe && date && (
+                                                            <div className="mt-auto flex gap-1 z-10 shrink-0 pb-0.5 px-0.5">
+                                                                {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-sm"></div>}
+                                                                {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-sm"></div>}
+                                                                {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shadow-sm"></div>}
                                                             </div>
                                                         )}
-                                                        <div className="mt-auto flex flex-wrap gap-x-1 gap-y-0.5 z-10 shrink-0">
-                                                            {ev?.isAfterSchoolEnglish && <div className="text-[8px] font-black text-emerald-600 bg-emerald-50 px-1 rounded truncate border border-emerald-100">[{sessionCounters.isAfterSchoolEnglish[dStr]}] 방과후</div>}
-                                                            {ev?.isChineseOnline && <div className="text-[8px] font-black text-amber-600 bg-amber-50 px-1 rounded truncate border border-amber-100">[{sessionCounters.isChineseOnline[dStr]}] 중국어</div>}
-                                                            {ev?.isEnglishOnline && <div className="text-[8px] font-black text-purple-600 bg-purple-50 px-1 rounded truncate border border-purple-100">[{sessionCounters.isEnglishOnline[dStr]}] 온라인</div>}
-                                                            {isWe && ev?.isSpecialLecture && (
-                                                                <div className="w-full text-white font-black text-center text-[12px] leading-tight py-4 drop-shadow-md">토요특강<br/><span className="text-yellow-300">({sessionCounters.isSpecialLecture[dStr]}회)</span></div>
-                                                            )}
-                                                        </div>
-                                                        {!ev?.schoolName && !ev?.isSpecialLecture && date && !isWe && <div className="flex-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="plus" size={32} className="text-slate-100" /></div>}
+
+                                                        {!ev?.schoolName && !ev?.isSpecialLecture && date && !isWe && <div className="hidden md:flex flex-1 items-center justify-center opacity-0 hover:opacity-100 transition-opacity"><Icon name="plus" size={32} className="text-slate-300" /></div>}
                                                     </div>
                                                 );
                                             })}
@@ -434,19 +550,19 @@
                             </div>
                         ) : (
                             <div className="flex-1 flex flex-col bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden min-h-0">
-                                <div className="p-4 border-b bg-slate-50 flex justify-between items-center shrink-0"><h2 className="text-sm font-black">{season.label} 신청 명단 ({listData.length}건)</h2></div>
+                                <div className="p-3 md:p-4 border-b bg-slate-50 flex justify-between items-center shrink-0"><h2 className="text-xs md:text-sm font-black">{season.label} 신청 명단 ({listData.length}건)</h2></div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar">
-                                    <table className="w-full text-left border-collapse text-xs">
-                                        <thead className="sticky top-0 bg-slate-900 text-white font-black z-10"><tr><th className="p-3">학교명</th><th className="p-3">날짜</th><th className="p-3">학년/반</th><th className="p-3">인원</th><th className="p-3">시간</th><th className="p-3">특이사항</th></tr></thead>
+                                    <table className="w-full text-left border-collapse text-[10px] md:text-xs">
+                                        <thead className="sticky top-0 bg-slate-900 text-white font-black z-10"><tr><th className="p-2 md:p-3">학교명</th><th className="p-2 md:p-3">날짜</th><th className="p-2 md:p-3">학년/반</th><th className="p-2 md:p-3">인원</th><th className="hidden md:table-cell p-3">시간</th><th className="hidden md:table-cell p-3">특이사항</th></tr></thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {listData.map(e => (
-                                                <tr key={e.date} onClick={() => openModal(e.date, e)} className="hover:bg-blue-50 transition-colors cursor-pointer group">
-                                                    <td className="p-3 text-sm font-black text-slate-900 group-hover:text-blue-700">{e.schoolName}</td>
-                                                    <td className="p-3 text-sm font-black text-blue-600">{e.date}</td>
-                                                    <td className="p-3 font-bold">{e.schoolType === '유치원' ? '유치원' : `${e.selectedGrades?.join(',')}학년${e.classNum !== '-' ? ` ${e.classNum}반` : ''}`}</td>
-                                                    <td className="p-3 font-black text-emerald-600">{e.people}명</td>
-                                                    <td className="p-3 text-slate-500 font-bold">{e.startTime}~{e.endTime}</td>
-                                                    <td className="p-3 text-red-600 font-black truncate max-w-[200px]">{e.note || '-'}</td>
+                                                <tr key={e.date} onClick={() => handleCellClick(e.date, e)} className="hover:bg-blue-50 transition-colors cursor-pointer group">
+                                                    <td className="p-2 md:p-3 font-black text-slate-900 group-hover:text-blue-700 max-w-[80px] truncate">{e.schoolName}</td>
+                                                    <td className="p-2 md:p-3 font-black text-blue-600">{e.date}</td>
+                                                    <td className="p-2 md:p-3 font-bold">{e.schoolType === '유치원' ? '유치원' : `${e.selectedGrades?.join(',')}학년${e.classNum !== '-' ? ` ${e.classNum}반` : ''}`}</td>
+                                                    <td className="p-2 md:p-3 font-black text-emerald-600">{e.people}명</td>
+                                                    <td className="hidden md:table-cell p-3 text-slate-700 font-bold">{e.startTime}~{e.endTime}</td>
+                                                    <td className="hidden md:table-cell p-3 text-red-600 font-black truncate max-w-[200px]">{e.note || '-'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -456,26 +572,124 @@
                         )}
                     </main>
 
-                    {/* Context Menu */}
-                    {contextMenu && (
-                        <div className="fixed z-[300] bg-white border border-slate-200 shadow-2xl rounded-xl py-2 w-48" style={{ left: contextMenu.x, top: contextMenu.y }}>
-                            {contextMenu.event && contextMenu.event.schoolName ? (
-                                <button onClick={() => copyEvent(contextMenu.event)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-slate-700">
-                                    <Icon name="copy" size={16} /> 학교 일정 복사
-                                </button>
-                            ) : null}
-                            {copiedEvent && (
-                                <button onClick={() => pasteEvent(contextMenu.date)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-blue-600">
-                                    <Icon name="check" size={16} /> 여기에 일정 붙여넣기
-                                </button>
-                            )}
-                            {(!contextMenu.event || !contextMenu.event.schoolName) && !copiedEvent && (
-                                <div className="px-4 py-2 text-xs font-bold text-slate-400">명령 없음</div>
-                            )}
+                    {/* PC 전용 톱니바퀴 설정 모달 */}
+                    {isSettingsModalOpen && !isMobile && (
+                        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                            <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+                                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                                    <h2 className="text-lg font-black text-slate-800 flex items-center gap-2"><Icon name="settings" size={18} className="text-slate-600" /> {season.label} 토글 일정 설정</h2>
+                                    <button onClick={() => setIsSettingsModalOpen(false)} className="p-1 hover:bg-slate-200 rounded-full transition-all"><Icon name="x" size={20} /></button>
+                                </div>
+                                <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar text-sm bg-white">
+                                    <div className="text-xs font-bold text-slate-500 mb-2 leading-relaxed">이름을 빈칸으로 저장하면 해당 일정 아이콘은 달력에서 완전히 숨김 처리됩니다.</div>
+                                    
+                                    {/* 항목 렌더링 헬퍼 */}
+                                    {[
+                                        { key: 'isAfterSchoolEnglish', defaultIcon: 'book', color: 'text-emerald-600 bg-emerald-50' },
+                                        { key: 'isChineseOnline', defaultIcon: 'globe', color: 'text-amber-600 bg-amber-50' },
+                                        { key: 'isEnglishOnline', defaultIcon: 'globe', color: 'text-purple-600 bg-purple-50' },
+                                        { key: 'isSpecialLecture', defaultIcon: 'star', color: 'text-yellow-500 bg-blue-800', isFixed: true }
+                                    ].map(item => (
+                                        <div key={item.key} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 shadow-sm space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2 flex-1">
+                                                    <div className={`p-1.5 rounded-lg ${item.color}`}><Icon name={item.defaultIcon} size={14} /></div>
+                                                    {editingKey === item.key ? (
+                                                        <div className="flex items-center gap-1 flex-1 max-w-[200px]">
+                                                            <input type="text" autoFocus value={tempSettings[item.key].name} onChange={e => setTempSettings(p => ({...p, [item.key]: {...p[item.key], name: e.target.value}}))} onKeyDown={e => e.key === 'Enter' && setEditingKey(null)} className="w-full px-2 py-1 text-sm font-black border border-blue-400 rounded outline-none shadow-inner" placeholder="이름 비우기=숨김" />
+                                                            <button onClick={() => setEditingKey(null)} className="p-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"><Icon name="check" size={14} /></button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setEditingKey(item.key)}>
+                                                            <span className={`text-sm font-black ${tempSettings[item.key].name ? 'text-slate-800' : 'text-slate-400 italic'}`}>{tempSettings[item.key].name || '(숨김 상태)'}</span>
+                                                            <button className="text-slate-300 group-hover:text-blue-500 transition-colors"><Icon name="edit" size={14} /></button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            
+                                            {/* 요일 선택부 (토요특강 제외) */}
+                                            {!item.isFixed ? (
+                                                <div className="flex items-center gap-1.5 pl-9">
+                                                    {[{lbl:'월', v:1}, {lbl:'화', v:2}, {lbl:'수', v:3}, {lbl:'목', v:4}, {lbl:'금', v:5}].map(d => {
+                                                        const active = tempSettings[item.key].days.includes(d.v);
+                                                        return (
+                                                            <button key={d.v} onClick={() => toggleTempDay(item.key, d.v)} className={`w-8 h-8 rounded-full text-xs font-black transition-all border ${active ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'}`}>
+                                                                {d.lbl}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : (
+                                                <div className="pl-9 text-xs font-bold text-slate-400">주말 고정 배치</div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="p-4 border-t border-slate-100 flex gap-3 bg-slate-50">
+                                    <button onClick={() => setIsSettingsModalOpen(false)} className="flex-1 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-600 font-black hover:bg-slate-100 transition-all">취소</button>
+                                    <button onClick={requestSettingsSave} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-black hover:bg-blue-700 transition-all shadow-md">저장</button>
+                                </div>
+                            </div>
                         </div>
                     )}
 
-                    {/* Delete Confirm Modal */}
+                    {/* PC 설정 변경 경고 커스텀 모달 (Rule 위반 alert/confirm 대체) */}
+                    {pendingSettingsSave && !isMobile && (
+                        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in zoom-in duration-150">
+                            <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-red-100">
+                                <div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500"><Icon name="alert" size={32} /></div>
+                                <h3 className="text-xl font-black text-slate-900 mb-2">변경 사항 적용 경고</h3>
+                                <p className="text-slate-500 text-sm font-bold mb-6 text-center leading-relaxed">
+                                    이름이나 요일 배치가 변경된 항목의 <span className="text-red-500">기존 등록된 일정(토글) 기록이 모두 삭제</span>됩니다.<br/>그래도 적용하시겠습니까?
+                                </p>
+                                <div className="flex gap-3 mt-4">
+                                    <button onClick={() => setPendingSettingsSave(null)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200 transition-all">취소</button>
+                                    <button onClick={confirmSettingsSave} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black hover:bg-red-600 shadow-lg transition-all">확인 및 적용</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 모바일 전용 날짜 클릭 시 상세 조회 모달 (커스텀 설정 이름 반영) */}
+                    {detailModalData && (
+                        <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in duration-200" onClick={() => setDetailModalData(null)}>
+                            <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden border border-slate-200 shadow-2xl p-5 relative" onClick={(e) => e.stopPropagation()}>
+                                <button onClick={() => setDetailModalData(null)} className="absolute top-4 right-4 p-1.5 bg-slate-100 text-slate-600 rounded-full hover:bg-slate-200"><Icon name="x" size={18} /></button>
+                                <h3 className="text-sm font-black text-blue-600 border-b pb-2 mb-4">{detailModalData.date} 일정</h3>
+                                {detailModalData.event?.schoolName ? (
+                                    <div className="space-y-2">
+                                        <div className="text-xl font-black text-slate-900">{detailModalData.event.schoolName}</div>
+                                        <div className="text-sm font-bold text-slate-600 flex justify-between border-b border-slate-50 pb-2">
+                                            <span>{detailModalData.event.schoolType === '유치원' ? '유치원' : `${detailModalData.event.selectedGrades?.join(',')}학년 ${detailModalData.event.classNum}반`}</span>
+                                            <span className="text-emerald-600 font-black">{detailModalData.event.people}명</span>
+                                        </div>
+                                        <div className="text-xs font-bold text-slate-500 py-1">시간: <span className="text-slate-800">{detailModalData.event.startTime} ~ {detailModalData.event.endTime}</span></div>
+                                        {detailModalData.event.note && <div className="mt-2 text-xs font-black text-red-600 bg-red-50 p-2.5 rounded-xl border border-red-100">특이사항: {detailModalData.event.note}</div>}
+                                    </div>
+                                ) : ( <div className="text-sm font-bold text-slate-400 py-4 text-center">등록된 일정이 없습니다.</div> )}
+                                
+                                <div className="mt-4 pt-3 border-t border-slate-100">
+                                    <div className="text-[10px] font-black text-slate-400 mb-2">기타 일정</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {detailModalData.event?.isSpecialLecture && settings.isSpecialLecture.name && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-[11px] font-black border border-blue-200">{settings.isSpecialLecture.name}</span>}
+                                        {detailModalData.event?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded text-[11px] font-black border border-emerald-200">{settings.isAfterSchoolEnglish.name}</span>}
+                                        {detailModalData.event?.isChineseOnline && settings.isChineseOnline.name && <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-[11px] font-black border border-amber-200">{settings.isChineseOnline.name}</span>}
+                                        {detailModalData.event?.isEnglishOnline && settings.isEnglishOnline.name && <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-[11px] font-black border border-purple-200">{settings.isEnglishOnline.name}</span>}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 기존 PC 모달들 생략 (삭제확인, 에디터, 컨텍스트 메뉴 동일 유지) */}
+                    {contextMenu && !isMobile && (
+                        <div className="fixed z-[300] bg-white border border-slate-200 shadow-2xl rounded-xl py-2 w-48" style={{ left: contextMenu.x, top: contextMenu.y }}>
+                            {contextMenu.event?.schoolName && ( <button onClick={() => copyEvent(contextMenu.event)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-slate-700"><Icon name="copy" size={16} /> 학교 일정 복사</button> )}
+                            {copiedEvent && ( <button onClick={() => pasteEvent(contextMenu.date)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-blue-600"><Icon name="check" size={16} /> 여기에 일정 붙여넣기</button> )}
+                        </div>
+                    )}
+
                     {isDeleteConfirmOpen && (
                         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in zoom-in duration-150">
                             <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border">
@@ -490,7 +704,6 @@
                         </div>
                     )}
 
-                    {/* Modal */}
                     {isModalOpen && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
                             <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
@@ -520,7 +733,7 @@
                                     <div className="space-y-1"><label className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1"><Icon name="alert" size={10} /> 특이사항</label><input type="text" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="여기에 메모를 입력하세요" className="w-full px-4 py-2.5 rounded-xl border border-red-50 bg-red-50/20 font-black text-red-600 text-sm outline-none focus:ring-1 focus:ring-red-500 transition-all shadow-inner" /></div>
                                     <div className="pt-2 flex gap-3">
                                         {editingEvent && <button type="button" onClick={() => setIsDeleteConfirmOpen(true)} className="p-3 text-red-500 hover:bg-red-50 rounded-xl border border-red-100 shadow-sm active:scale-90 transition-all"><Icon name="trash" size={18} /></button>}
-                                        <button type="submit" className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-black text-sm hover:bg-black transition-all shadow-xl active:scale-[0.98]">정보 확정 저장</button>
+                                        <button type="submit" className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-black text-sm hover:bg-black transition-all shadow-xl active:scale-[0.98]">일정 저장</button>
                                     </div>
                                 </form>
                             </div>
