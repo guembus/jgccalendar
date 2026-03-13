@@ -1,599 +1,293 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  doc, 
-  deleteDoc, 
-  updateDoc,
-  getDoc,
-  setDoc
-} from 'firebase/firestore';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  signInWithCustomToken, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Plus, 
-  X, 
-  Calendar as CalendarIcon, 
-  Clock, 
-  AlertCircle,
-  Trash2, 
-  CheckCircle2,
-  Users,
-  Printer,
-  BookOpen,
-  Globe,
-  Star,
-  ToggleRight,
-  ToggleLeft,
-  List as ListIcon,
-  LayoutGrid,
-  Info
-} from 'lucide-react';
-
-/**
- * [GitHub Pages 배포 가이드]
- * 1. Firebase 콘솔(console.firebase.google.com)에서 프로젝트를 생성하세요.
- * 2. '웹 앱'을 추가하고 받은 아래의 설정값(apiKey 등)을 직접 입력하세요.
- * 3. 깃허브 레포지토리에 이 파일을 포함하여 배포하면 모든 사용자가 데이터를 공유합니다.
- */
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "YOUR_API_KEY_HERE",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
-    };
-
-// Firebase 초기화
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'program-manager-2026';
-
-const App = () => {
-  const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('calendar'); 
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 2, 1)); // 2026년 3월 기본값
-  const [events, setEvents] = useState([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [editingEvent, setEditingEvent] = useState(null);
-  
-  const initialForm = {
-    schoolType: '초등학교',
-    schoolName: '',
-    selectedGrades: ['3'],
-    classNum: '-',
-    kinderClass: '',
-    startTimeIdx: 3, // 09:30
-    endTimeIdx: 6,   // 12:00
-    people: '20',
-    note: ''
-  };
-
-  const [formData, setFormData] = useState(initialForm);
-
-  // 시간 옵션 배열 (09:00 ~ 13:00)
-  const startTimeOptions = useMemo(() => {
-    const opts = [];
-    for (let m = 0; m <= 60; m += 10) {
-      opts.push(`09:${String(m).padStart(2, '0')}`);
-      if (m === 60) opts[opts.length-1] = "10:00";
-    }
-    return opts;
-  }, []);
-
-  const endTimeOptions = useMemo(() => {
-    const opts = [];
-    for (let h = 11; h <= 13; h++) {
-      for (let m = 0; m < 60; m += 10) {
-        opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-        if (h === 13) break;
-      }
-    }
-    opts.push("13:00");
-    return Array.from(new Set(opts));
-  }, []);
-
-  // --- 학년도(3월~2월) 시즌 계산 로직 ---
-  const seasonInfo = useMemo(() => {
-    const y = currentDate.getFullYear();
-    const m = currentDate.getMonth(); // 0(1월) ~ 11(12월)
-    const seasonStartYear = m < 2 ? y - 1 : y; // 1, 2월은 작년 3월부터 시작된 학년도에 속함
-    const startStr = `${seasonStartYear}-03-01`;
-    const endStr = `${seasonStartYear + 1}-02-29`;
-    return { startYear: seasonStartYear, startStr, endStr, label: `${seasonStartYear}학년도` };
-  }, [currentDate]);
-
-  // 현재 시즌에 해당하는 데이터만 필터링
-  const seasonEvents = useMemo(() => {
-    return events.filter(e => e.date >= seasonInfo.startStr && e.date <= seasonInfo.endStr);
-  }, [events, seasonInfo]);
-
-  // 동적 회차 계산 (시즌 내 누적)
-  const sessionCounters = useMemo(() => {
-    const counters = { isSpecialLecture: {}, isAfterSchoolEnglish: {}, isChineseOnline: {}, isEnglishOnline: {} };
-    const fields = ['isSpecialLecture', 'isAfterSchoolEnglish', 'isChineseOnline', 'isEnglishOnline'];
-    fields.forEach(field => {
-      const activeInSeason = seasonEvents
-        .filter(e => e[field] === true)
-        .sort((a, b) => a.date.localeCompare(b.date));
-      activeInSeason.forEach((e, idx) => {
-        counters[field][e.date] = idx + 1;
-      });
-    });
-    return counters;
-  }, [seasonEvents]);
-
-  // 신청 명단 정렬 (학교 가나다순 -> 날짜순)
-  const listData = useMemo(() => {
-    return [...seasonEvents]
-      .filter(e => e.schoolName && e.schoolName.trim() !== '')
-      .sort((a, b) => {
-        // 1순위: 학교명 가나다순 (접미사 제외하고 순수 이름으로 비교 가능)
-        const schoolComp = a.schoolName.localeCompare(b.schoolName);
-        if (schoolComp !== 0) return schoolComp;
-        // 2순위: 활동 날짜순
-        return a.date.localeCompare(b.date);
-      });
-  }, [seasonEvents]);
-
-  // 1. 인증 처리 및 마지막 보기 위치 복구
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) { console.error("Auth failed:", err); }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        const settingsRef = doc(db, 'artifacts', appId, 'users', u.uid, 'settings', 'view');
-        const snap = await getDoc(settingsRef);
-        if (snap.exists() && snap.data().lastMonth) {
-          setCurrentDate(new Date(snap.data().lastMonth));
-        }
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 2. 현재 달력 위치 저장
-  useEffect(() => {
-    if (!user) return;
-    const saveView = async () => {
-      const settingsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'view');
-      await setDoc(settingsRef, { lastMonth: currentDate.toISOString() }, { merge: true });
-    };
-    saveView();
-  }, [currentDate, user]);
-
-  // 3. 실시간 데이터 수신 (모든 사용자 공유)
-  useEffect(() => {
-    if (!user) return;
-    const eventsCollection = collection(db, 'artifacts', appId, 'public', 'data', 'events');
-    const unsubscribe = onSnapshot(eventsCollection, (snapshot) => {
-      setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (err) => console.error("Snapshot error:", err));
-    return () => unsubscribe();
-  }, [user]);
-
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-
-  const calendarWeeks = useMemo(() => {
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const days = [];
-    let startOffset = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
-    for (let i = 0; i < startOffset; i++) days.push(null);
-    for (let d = 1; d <= lastDay.getDate(); d++) days.push(new Date(year, month, d));
-    const weeks = [];
-    for (let i = 0; i < days.length; i += 7) {
-      const week = days.slice(i, i + 7);
-      weeks.push([ week[0] || null, week[1] || null, week[2] || null, week[3] || null, week[4] || null, { sat: week[5] || null, sun: week[6] || null } ]);
-    }
-    return weeks;
-  }, [year, month]);
-
-  const toggleRegularActivity = async (dateStr, currentEvent, field) => {
-    if (!user) return;
-    const eventData = currentEvent ? { ...currentEvent, [field]: !currentEvent[field] } : { 
-      ...initialForm, date: dateStr, [field]: true, schoolName: '', selectedGrades: []
-    };
-    try {
-      if (currentEvent?.id) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'events', currentEvent.id), eventData);
-      } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), eventData);
-      }
-    } catch (e) { console.error("Toggle error:", e); }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!user || !formData.schoolName) return;
-    const typeSuffix = formData.schoolType === '유치원' ? '유' : formData.schoolType === '초등학교' ? '초' : '중';
-    let baseName = formData.schoolName.trim();
-    const patterns = [/초등학교$/, /중학교$/, /유치원$/, /초$/, /중$/, /유$/];
-    patterns.forEach(p => { baseName = baseName.replace(p, ''); });
-    const finalSchoolName = baseName + typeSuffix;
-    const eventData = { 
-      ...formData, 
-      schoolName: finalSchoolName,
-      startTime: startTimeOptions[formData.startTimeIdx],
-      endTime: endTimeOptions[formData.endTimeIdx],
-      date: selectedDate, 
-      updatedAt: new Date().toISOString() 
-    };
-    try {
-      if (editingEvent) {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'events', editingEvent.id);
-        await updateDoc(docRef, eventData);
-      } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), eventData);
-      }
-      closeModal();
-    } catch (e) { console.error("Submit error:", e); }
-  };
-
-  const handleDelete = async () => {
-    if (!user || !editingEvent?.id) return;
-    if (window.confirm("정말 이 일정을 삭제하시겠습니까?\n삭제된 정보는 즉시 모든 접속자의 화면에서 사라집니다.")) {
-      try {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'events', editingEvent.id);
-        await deleteDoc(docRef);
-        closeModal();
-      } catch (e) {
-        console.error("Delete execution failed:", e);
-      }
-    }
-  };
-
-  const openModal = (date, event = null) => {
-    if (!date) return;
-    setSelectedDate(date);
-    if (event) {
-      setEditingEvent(event);
-      let name = event.schoolName || '';
-      ['유', '초', '중'].forEach(s => { if(name.endsWith(s)) name = name.slice(0, -1); });
-      setFormData({ 
-        ...event, 
-        schoolName: name,
-        startTimeIdx: startTimeOptions.indexOf(event.startTime) !== -1 ? startTimeOptions.indexOf(event.startTime) : 3,
-        endTimeIdx: endTimeOptions.indexOf(event.endTime) !== -1 ? endTimeOptions.indexOf(event.endTime) : 6
-      });
-    } else {
-      setEditingEvent(null);
-      setFormData(initialForm);
-    }
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setEditingEvent(null);
-  };
-
-  const getEventForDate = (date) => {
-    if (!date) return null;
-    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    return events.find(event => event.date === dateStr);
-  };
-
-  const getNoteStyle = (text) => {
-    if (!text) return "";
-    const len = text.length;
-    if (len < 10) return "text-[18px]";
-    if (len < 20) return "text-[15px]";
-    return "text-[12px]";
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans print:p-0 select-none">
-      {/* Header */}
-      <header className="max-w-[1600px] mx-auto p-2 md:px-6 flex justify-between items-center print:hidden border-b border-slate-100 bg-white sticky top-0 z-[50] shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="bg-slate-900 p-1.5 rounded-lg text-white">
-            <CalendarIcon size={16} />
-          </div>
-          <div className="flex flex-col">
-            <h1 className="text-sm font-black text-slate-800 tracking-tight">PROGRAM MANAGER</h1>
-            <span className="text-[10px] font-bold text-blue-600 leading-none">{seasonInfo.label} 운영</span>
-          </div>
-          
-          <nav className="flex bg-slate-100 p-1 rounded-xl ml-4">
-            <button onClick={() => setActiveTab('calendar')} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${activeTab === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>
-              <LayoutGrid size={14} /> 달력
-            </button>
-            <button onClick={() => setActiveTab('list')} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${activeTab === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>
-              <ListIcon size={14} /> 명단
-            </button>
-          </nav>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-slate-200 shadow-sm">
-            <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="p-1 hover:bg-slate-50 rounded-lg transition-all"><ChevronLeft size={16} /></button>
-            <div className="px-2 font-black text-sm min-w-[80px] text-center">{year}.{String(month + 1).padStart(2, '0')}</div>
-            <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="p-1 hover:bg-slate-50 rounded-lg transition-all"><ChevronRight size={16} /></button>
-          </div>
-          <button onClick={() => window.print()} className="bg-slate-800 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-black transition-all text-[10px] flex items-center gap-1 shadow-md">
-            <Printer size={12} /> PRINT
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-[1600px] mx-auto p-1.5 print:p-0">
-        {activeTab === 'calendar' ? (
-          <>
-            <div className="grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] bg-slate-900 border-x border-t border-slate-900 rounded-t-xl overflow-hidden shadow-xl">
-              {['월', '화', '수', '목', '금', '토/일'].map((day) => (
-                <div key={day} className={`py-1 text-center text-[10px] font-black ${day === '토/일' ? 'text-blue-300' : 'text-white'}`}>
-                  {day}요일
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] border-l border-slate-800 print:border-slate-400 shadow-2xl bg-white">
-              {calendarWeeks.map((week, wIdx) => (
-                week.map((cell, cIdx) => {
-                  const isWeekendCell = cIdx === 5;
-                  const dateObj = isWeekendCell ? cell.sat : cell;
-                  const sunObj = isWeekendCell ? cell.sun : null;
-                  const event = getEventForDate(dateObj);
-                  const dateStr = dateObj ? `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}` : null;
-                  const isToday = dateObj && new Date().toISOString().split('T')[0] === dateStr;
-                  const dayOfWeek = dateObj ? dateObj.getDay() : -1;
-
-                  return (
-                    <div 
-                      key={`${wIdx}-${cIdx}`}
-                      onClick={() => dateObj && !isWeekendCell && openModal(dateStr, event)}
-                      className={`group relative p-1.5 border-b border-r border-slate-800 min-h-[195px] flex flex-col transition-all cursor-pointer print:min-h-[135px] ${!dateObj ? 'bg-slate-50' : isToday ? 'bg-blue-50' : 'bg-white hover:bg-blue-50/10'} ${isWeekendCell && event?.isSpecialLecture ? '!bg-blue-700' : isWeekendCell ? 'bg-slate-100/30' : ''}`}
-                    >
-                      <div className="flex justify-between items-start mb-1 z-20">
-                        <span className={`text-base font-black ${!dateObj ? 'opacity-0' : (isWeekendCell && event?.isSpecialLecture) ? '!text-white' : isToday ? 'text-blue-600' : isWeekendCell ? 'text-blue-400' : 'text-slate-300'}`}>
-                          {dateObj?.getDate()}
-                        </span>
-                        
-                        {dateObj && (
-                          <div className="flex gap-1 print:hidden z-[30]">
-                            {isWeekendCell && (
-                              <button onClick={(e) => { e.stopPropagation(); toggleRegularActivity(dateStr, event, 'isSpecialLecture'); }} className={`p-0.5 rounded transition-all shadow-sm ${event?.isSpecialLecture ? 'text-yellow-400 bg-blue-800 ring-1 ring-blue-400' : 'text-slate-400 bg-white hover:text-slate-600 border border-slate-100'}`}>
-                                <Star size={18} fill={event?.isSpecialLecture ? "currentColor" : "none"} />
-                              </button>
-                            )}
-                            {(dayOfWeek === 1 || dayOfWeek === 5) && !isWeekendCell && (
-                              <button onClick={(e) => { e.stopPropagation(); toggleRegularActivity(dateStr, event, 'isAfterSchoolEnglish'); }} className={`p-0.5 rounded transition-all ${event?.isAfterSchoolEnglish ? 'text-emerald-600 bg-emerald-50 ring-1 ring-emerald-200' : 'text-slate-400'}`}><BookOpen size={16} /></button>
-                            )}
-                            {dayOfWeek === 3 && (
-                              <button onClick={(e) => { e.stopPropagation(); toggleRegularActivity(dateStr, event, 'isChineseOnline'); }} className={`p-0.5 rounded transition-all ${event?.isChineseOnline ? 'text-amber-600 bg-amber-50 ring-1 ring-amber-200' : 'text-slate-400'}`}><Globe size={16} /></button>
-                            )}
-                            {(dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 5) && !isWeekendCell && (
-                              <button onClick={(e) => { e.stopPropagation(); toggleRegularActivity(dateStr, event, 'isEnglishOnline'); }} className={`p-0.5 rounded transition-all ${event?.isEnglishOnline ? 'text-purple-600 bg-purple-50 ring-1 ring-purple-200' : 'text-slate-400'}`}><Globe size={16} /></button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      
-                      {!isWeekendCell && event && event.schoolName && (
-                        <div className="flex-1 flex flex-col space-y-1.5 overflow-hidden z-10">
-                          <div className="text-[24px] font-black text-slate-900 leading-[1] tracking-tighter truncate">{event.schoolName}</div>
-                          <div className="flex items-center gap-1.5">
-                            <div className="text-[17px] font-black text-blue-700 bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100 leading-none">
-                              {event.schoolType === '유치원' ? event.kinderClass : `${event.selectedGrades?.join(',')}학년${event.selectedGrades?.length === 1 && event.classNum !== '-' ? ' ' + event.classNum + '반' : ''}`}
-                            </div>
-                            <div className="text-[17px] font-black text-emerald-600 flex items-center gap-0.5 leading-none">
-                              <Users size={14} strokeWidth={3} /> {event.people}
-                            </div>
-                          </div>
-                          <div className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mt-0.5"><Clock size={10} /> {event.startTime}-{event.endTime}</div>
-                          {event.note && (
-                            <div className="pt-1 overflow-hidden">
-                              <div className={`${getNoteStyle(event.note)} text-red-600 font-black leading-tight border-t-2 border-red-400 pt-1 truncate`}>{event.note}</div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="mt-auto pt-1 space-y-0.5 z-10">
-                        {event?.isAfterSchoolEnglish && <div className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1 rounded truncate">[{sessionCounters.isAfterSchoolEnglish[dateStr]}회] 방과후</div>}
-                        {event?.isChineseOnline && <div className="text-[9px] font-black text-amber-600 bg-amber-50 px-1 rounded truncate">[{sessionCounters.isChineseOnline[dateStr]}회] 중국어</div>}
-                        {event?.isEnglishOnline && <div className="text-[9px] font-black text-purple-600 bg-purple-50 px-1 rounded truncate">[{sessionCounters.isEnglishOnline[dateStr]}회] 온라인</div>}
-                        {isWeekendCell && event?.isSpecialLecture && (
-                          <div className="flex-1 flex flex-col items-center justify-center py-6">
-                            <div className="text-white text-[13px] font-black text-center drop-shadow-md leading-tight">
-                              토요 글로벌<br/>언어특강<br/>
-                              <span className="text-yellow-300 text-sm">[{sessionCounters.isSpecialLecture[dateStr]}회차]</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      {!event?.schoolName && !event?.isSpecialLecture && dateObj && !isWeekendCell && (
-                        <div className="flex-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Plus size={36} className="text-slate-100" /></div>
-                      )}
-                    </div>
-                  );
-                })
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in duration-300">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <div>
-                <h2 className="text-lg font-black text-slate-800">{seasonInfo.label} 신청 학교 명단</h2>
-                <p className="text-xs text-slate-500 font-bold mt-1">학교 가나다순 정렬 (총 {listData.length}건)</p>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest">
-                    <th className="px-6 py-4">학교명</th>
-                    <th className="px-6 py-4">활동 일자</th>
-                    <th className="px-6 py-4">대상 학년/반</th>
-                    <th className="px-6 py-4">인원</th>
-                    <th className="px-6 py-4">희망 시간</th>
-                    <th className="px-6 py-4">특이사항</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {listData.map((e) => (
-                    <tr key={e.id} onClick={() => openModal(e.date, e)} className="hover:bg-blue-50 transition-colors cursor-pointer group">
-                      <td className="px-6 py-4 text-base font-black text-slate-900 group-hover:text-blue-700">{e.schoolName}</td>
-                      <td className="px-6 py-4 text-sm font-black text-blue-600">{e.date}</td>
-                      <td className="px-6 py-4">
-                        <span className="bg-slate-100 px-2 py-1 rounded-lg text-xs font-bold text-slate-700">
-                          {e.schoolType === '유치원' ? e.kinderClass : `${e.selectedGrades?.join(',')}학년 ${e.classNum !== '-' ? e.classNum + '반' : ''}`}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm font-black text-emerald-600"><Users size={14} className="inline mr-1" />{e.people}명</td>
-                      <td className="px-6 py-4 text-xs font-bold text-slate-500">{e.startTime} ~ {e.endTime}</td>
-                      <td className="px-6 py-4 text-xs font-black text-red-600 max-w-[200px] truncate">{e.note || '-'}</td>
-                    </tr>
-                  ))}
-                  {listData.length === 0 && (
-                    <tr><td colSpan="6" className="px-6 py-32 text-center text-slate-300 text-lg font-black uppercase tracking-widest">데이터 없음</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* 일정 등록/수정 모달 */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md print:hidden">
-          <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white">
-              <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">학교 일정 {editingEvent ? '수정' : '등록'}</h2>
-              <button onClick={closeModal} className="p-1 hover:bg-slate-100 rounded-full transition-all"><X size={20} /></button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[85vh] overflow-y-auto custom-scrollbar text-sm">
-              <div className="bg-blue-50 px-3 py-2 rounded-xl text-blue-700 text-xs font-black flex justify-between items-center">
-                <span>{selectedDate}</span>
-                <span className="opacity-60 underline decoration-2">{seasonInfo.label} 모드</span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-1 space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase">학교급</label>
-                  <select value={formData.schoolType} onChange={(e) => setFormData({...formData, schoolType: e.target.value})} className="w-full px-2 py-2 rounded-xl border border-slate-200 bg-slate-50 font-bold outline-none">
-                    <option value="유치원">유치원</option>
-                    <option value="초등학교">초등학교</option>
-                    <option value="중학교">중학교</option>
-                  </select>
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase">학교명 (급 제외)</label>
-                  <input required type="text" value={formData.schoolName} onChange={(e) => setFormData({...formData, schoolName: e.target.value})} placeholder="학교 이름을 입력하세요" className="w-full px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 font-black outline-none focus:bg-white" />
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-4 rounded-3xl space-y-3 border border-slate-100 shadow-inner">
-                {formData.schoolType !== '유치원' && (
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 uppercase">학년 선택</label>
-                    <div className="grid grid-cols-6 gap-1">
-                      {(formData.schoolType === '초등학교' ? [1,2,3,4,5,6] : [1,2,3]).map(n => {
-                        const isSel = formData.selectedGrades.includes(n.toString());
-                        return (
-                          <button key={n} type="button" onClick={() => {
-                            let news = [...formData.selectedGrades];
-                            if(news.includes(n.toString())) news = news.filter(x => x !== n.toString());
-                            else news.push(n.toString());
-                            setFormData({...formData, selectedGrades: news, classNum: news.length === 1 ? formData.classNum : '-'});
-                          }} className={`py-1 rounded-lg text-[10px] font-black border transition-all ${isSel ? 'bg-slate-800 text-white border-slate-800 shadow-sm' : 'bg-white text-slate-400 border-slate-100'}`}>
-                            {n}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-3 items-end">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500">반 선택</label>
-                    <select disabled={formData.selectedGrades.length !== 1} value={formData.classNum} onChange={(e) => setFormData({...formData, classNum: e.target.value})} className="w-full px-3 py-1.5 rounded-lg border border-white bg-white font-bold text-xs shadow-sm">
-                      <option value="-">-</option>
-                      {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}반</option>)}
-                      <option value="통합">통합</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase">인원수</label>
-                    <input type="text" value={formData.people} onChange={(e) => setFormData({...formData, people: e.target.value})} className="w-full px-3 py-1.5 rounded-lg border border-white bg-white font-bold text-xs shadow-sm" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-blue-50/50 p-3 rounded-2xl border border-blue-50 space-y-2">
-                  <div className="flex justify-between text-[10px] font-black text-blue-400 uppercase"><span>시작 시간</span> <span className="text-blue-700">{startTimeOptions[formData.startTimeIdx]}</span></div>
-                  <input type="range" min="0" max={startTimeOptions.length - 1} step="1" value={formData.startTimeIdx} onChange={(e) => setFormData({...formData, startTimeIdx: parseInt(e.target.value)})} className="w-full h-1.5 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                </div>
-                <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-50 space-y-2">
-                  <div className="flex justify-between text-[10px] font-black text-emerald-400 uppercase"><span>종료 시간</span> <span className="text-emerald-700">{endTimeOptions[formData.endTimeIdx]}</span></div>
-                  <input type="range" min="0" max={endTimeOptions.length - 1} step="1" value={formData.endTimeIdx} onChange={(e) => setFormData({...formData, endTimeIdx: parseInt(e.target.value)})} className="w-full h-1.5 bg-emerald-100 rounded-lg appearance-none cursor-pointer accent-emerald-600" />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1"><AlertCircle size={10}/> 특이사항</label>
-                <input type="text" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="빨간색 강조 메모" className="w-full px-4 py-2.5 rounded-xl border border-red-50 bg-red-50/20 font-black text-red-600 text-sm outline-none focus:border-red-500" />
-              </div>
-
-              <div className="pt-2 flex gap-3">
-                {editingEvent && (
-                  <button type="button" onClick={handleDelete} className="p-3 text-red-500 hover:bg-red-50 rounded-xl border border-red-50 transition-all shadow-sm active:scale-90"><Trash2 size={18} /></button>
-                )}
-                <button type="submit" className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-black text-sm hover:bg-black transition-all shadow-xl active:scale-[0.98]">
-                  {editingEvent ? '정보 저장' : '일정 확정 저장'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <style dangerouslySetInnerHTML={{ __html: `
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: currentColor; cursor: pointer; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2026 통합 일정 관리 시스템</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
+        body { font-family: 'Pretendard', sans-serif; -webkit-print-color-adjust: exact; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%; background: #2563eb; cursor: pointer; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
         @media print {
-          @page { size: A4 landscape; margin: 0.2cm; }
-          body { background: white !important; }
-          .print\\:hidden { display: none !important; }
-          main { padding: 0 !important; width: 100% !important; max-width: none !important; }
-          .grid { border-top: 1.5px solid #000 !important; border-left: 1.5px solid #000 !important; }
-          .grid > div { border-bottom: 1.5px solid #000 !important; border-right: 1.5px solid #000 !important; min-height: 140px !important; }
-          .text-[24px] { font-size: 26px !important; font-weight: 900 !important; color: black !important; }
+            @page { size: A4 landscape; margin: 0.2cm; }
+            .print\:hidden { display: none !important; }
+            main { padding: 0 !important; width: 100% !important; max-width: none !important; }
+            .grid { border-top: 1.5px solid #000 !important; border-left: 1.5px solid #000 !important; }
+            .grid > div { border-bottom: 1.5px solid #000 !important; border-right: 1.5px solid #000 !important; min-height: 140px !important; }
+            .bg-blue-600 { background-color: #1d4ed8 !important; color: white !important; }
         }
-      `}} />
-    </div>
-  );
-};
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
 
-export default App;
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- Firebase 설정 (깃허브 배포 시 본인의 설정으로 반드시 교체하세요) ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "",
+            authDomain: "",
+            projectId: "",
+            storageBucket: "",
+            messagingSenderId: "",
+            appId: ""
+        };
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'program-manager-2026';
+
+        // 깃허브 ReferenceError 방지를 위한 전역 아이콘 컴포넌트
+        const LucideIcon = ({ name, size = 16, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons({ targets: [iconRef.current] });
+            }, [name]);
+            return <i ref={iconRef} data-lucide={name} className={className} style={{ width: size, height: size, display: 'inline-block' }}></i>;
+        };
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('calendar');
+            const [currentDate, setCurrentDate] = useState(new Date(2026, 2, 1));
+            const [events, setEvents] = useState([]);
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+            const [selectedDate, setSelectedDate] = useState(null);
+            const [editingEvent, setEditingEvent] = useState(null);
+
+            const initialForm = {
+                schoolType: '초등학교', schoolName: '', selectedGrades: ['3'],
+                classNum: '-', kinderClass: '', startTimeIdx: 3, endTimeIdx: 6,
+                people: '20', note: ''
+            };
+            const [formData, setFormData] = useState(initialForm);
+
+            const startTimeOptions = useMemo(() => {
+                const opts = [];
+                for (let m = 0; m <= 60; m += 10) opts.push(`09:${String(m).padStart(2, '0')}`);
+                opts[opts.length-1] = "10:00";
+                return opts;
+            }, []);
+
+            const endTimeOptions = useMemo(() => {
+                const opts = [];
+                for (let h = 11; h <= 13; h++) {
+                    for (let m = 0; m < 60; m += 10) opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+                }
+                opts.push("13:00");
+                return Array.from(new Set(opts));
+            }, []);
+
+            // 3월~2월 학년도 계산
+            const season = useMemo(() => {
+                const y = currentDate.getFullYear();
+                const m = currentDate.getMonth();
+                const sYear = m < 2 ? y - 1 : y;
+                return {
+                    start: `${sYear}-03-01`,
+                    end: `${sYear + 1}-02-29`,
+                    label: `${sYear}학년도`
+                };
+            }, [currentDate]);
+
+            const seasonEvents = useMemo(() => events.filter(e => e.date >= season.start && e.date <= season.end), [events, season]);
+
+            const sessionCounters = useMemo(() => {
+                const counters = { isSpecialLecture: {}, isAfterSchoolEnglish: {}, isChineseOnline: {}, isEnglishOnline: {} };
+                ['isSpecialLecture', 'isAfterSchoolEnglish', 'isChineseOnline', 'isEnglishOnline'].forEach(f => {
+                    const active = seasonEvents.filter(e => e[f] === true).sort((a, b) => a.date.localeCompare(b.date));
+                    active.forEach((e, i) => { counters[f][e.date] = i + 1; });
+                });
+                return counters;
+            }, [seasonEvents]);
+
+            const listData = useMemo(() => {
+                return [...seasonEvents].filter(e => e.schoolName && e.schoolName.trim() !== '')
+                    .sort((a, b) => {
+                        const sComp = a.schoolName.localeCompare(b.schoolName, 'ko');
+                        return sComp !== 0 ? sComp : a.date.localeCompare(b.date);
+                    });
+            }, [seasonEvents]);
+
+            useEffect(() => {
+                const unsub = auth.onAuthStateChanged(async (u) => {
+                    if (!u) {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await auth.signInWithCustomToken(__initial_auth_token);
+                        else await auth.signInAnonymously();
+                        return;
+                    }
+                    setUser(u);
+                    const snap = await db.collection('artifacts').doc(appId).collection('users').doc(u.uid).collection('settings').doc('view').get();
+                    if (snap.exists && snap.data().lastMonth) setCurrentDate(new Date(snap.data().lastMonth));
+                });
+                return () => unsub();
+            }, []);
+
+            useEffect(() => {
+                if (user) db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('settings').doc('view').set({ lastMonth: currentDate.toISOString() }, { merge: true });
+            }, [currentDate, user]);
+
+            useEffect(() => {
+                if (!user) return;
+                const unsub = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events').onSnapshot(s => setEvents(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+                return () => unsub();
+            }, [user]);
+
+            const calendarWeeks = useMemo(() => {
+                const y = currentDate.getFullYear(), m = currentDate.getMonth();
+                const f = new Date(y, m, 1), l = new Date(y, m + 1, 0), d = [];
+                let off = f.getDay() === 0 ? 6 : f.getDay() - 1;
+                for (let i = 0; i < off; i++) d.push(null);
+                for (let i = 1; i <= l.getDate(); i++) d.push(new Date(y, m, i));
+                const w = [];
+                for (let i = 0; i < d.length; i += 7) {
+                    const k = d.slice(i, i + 7);
+                    w.push([k[0]||null, k[1]||null, k[2]||null, k[3]||null, k[4]||null, {sat: k[5]||null, sun: k[6]||null}]);
+                }
+                return w;
+            }, [currentDate]);
+
+            const toggleAct = async (dStr, cur, f) => {
+                if (!user) return;
+                const data = cur ? { ...cur, [f]: !cur[f] } : { ...initialForm, date: dStr, [f]: true, schoolName: '', selectedGrades: [] };
+                const col = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events');
+                if (cur?.id) await col.doc(cur.id).update(data); else await col.add(data);
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!user || !formData.schoolName) return;
+                const suf = formData.schoolType === '유치원' ? '유' : formData.schoolType === '초등학교' ? '초' : '중';
+                let base = formData.schoolName.trim().replace(/(초등학교|중학교|유치원|초|중|유)$/, '');
+                const data = { ...formData, schoolName: base + suf, startTime: startTimeOptions[formData.startTimeIdx], endTime: endTimeOptions[formData.endTimeIdx], date: selectedDate, updatedAt: new Date().toISOString() };
+                const col = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events');
+                if (editingEvent) await col.doc(editingEvent.id).update(data); else await col.add(data);
+                closeModal();
+            };
+
+            const deleteConfirmed = async () => {
+                if (!user || !editingEvent?.id) return;
+                await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('events').doc(editingEvent.id).delete();
+                setIsDeleteConfirmOpen(false); closeModal();
+            };
+
+            const openModal = (d, ev = null) => {
+                setSelectedDate(d);
+                if (ev) {
+                    setEditingEvent(ev);
+                    setFormData({ ...ev, schoolName: (ev.schoolName || '').replace(/(유|초|중)$/, ''), startTimeIdx: startTimeOptions.indexOf(ev.startTime) !== -1 ? startTimeOptions.indexOf(ev.startTime) : 3, endTimeIdx: endTimeOptions.indexOf(ev.endTime) !== -1 ? endTimeOptions.indexOf(ev.endTime) : 6 });
+                } else { setEditingEvent(null); setFormData(initialForm); }
+                setIsModalOpen(true);
+            };
+
+            const closeModal = () => { setIsModalOpen(false); setEditingEvent(null); };
+
+            const getEv = (d) => {
+                if (!d) return null;
+                const s = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                return events.find(e => e.date === s);
+            };
+
+            return (
+                <div className="min-h-screen pb-10">
+                    <header className="max-w-[1600px] mx-auto p-2 md:px-6 flex justify-between items-center print:hidden border-b border-slate-200 bg-white sticky top-0 z-50 shadow-sm">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-slate-900 p-2 rounded-lg text-white"><LucideIcon name="calendar" size={18} /></div>
+                            <div className="flex flex-col"><h1 className="text-sm font-black text-slate-800 uppercase">PROGRAM MANAGER</h1><span className="text-[10px] font-bold text-blue-600">{season.label}</span></div>
+                            <nav className="flex bg-slate-100 p-1 rounded-xl ml-4">
+                                <button onClick={() => setActiveTab('calendar')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${activeTab === 'calendar' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>달력</button>
+                                <button onClick={() => setActiveTab('list')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${activeTab === 'list' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>명단</button>
+                            </nav>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-slate-200">
+                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-1 hover:bg-slate-50 rounded-lg"><LucideIcon name="chevron-left" size={18} /></button>
+                                <div className="px-2 font-black text-sm min-w-[90px] text-center">{currentDate.getFullYear()}.{String(currentDate.getMonth() + 1).padStart(2, '0')}</div>
+                                <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-1 hover:bg-slate-50 rounded-lg"><LucideIcon name="chevron-right" size={18} /></button>
+                            </div>
+                            <button onClick={() => window.print()} className="bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-[11px]">PRINT</button>
+                        </div>
+                    </header>
+
+                    <main className="max-w-[1600px] mx-auto p-2 mt-2">
+                        {activeTab === 'calendar' ? (
+                            <>
+                                <div className="grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] bg-slate-900 border-x border-t border-slate-900 rounded-t-xl overflow-hidden shadow-lg">
+                                    {['월', '화', '수', '목', '금', '토/일'].map(day => <div key={day} className={`py-2 text-center text-[11px] font-black ${day === '토/일' ? 'text-blue-300' : 'text-white'}`}>{day}요일</div>)}
+                                </div>
+                                <div className="grid grid-cols-[1fr_1fr_1fr_1fr_1fr_0.6fr] border-l border-slate-800 bg-white shadow-2xl">
+                                    {calendarWeeks.map((week, wIdx) => week.map((cell, cIdx) => {
+                                        const isWe = cIdx === 5; const date = isWe ? cell.sat : cell; const ev = getEv(date);
+                                        const dStr = date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : null;
+                                        const isToday = dStr === new Date().toISOString().split('T')[0];
+                                        const dow = date ? date.getDay() : -1;
+
+                                        return (
+                                            <div key={`${wIdx}-${cIdx}`} onClick={() => date && !isWe && openModal(dStr, ev)} className={`group relative p-1.5 border-b border-r border-slate-800 min-h-[210px] flex flex-col transition-all cursor-pointer ${!date ? 'bg-slate-50' : isToday ? 'bg-blue-50' : 'bg-white hover:bg-blue-50/10'} ${isWe && ev?.isSpecialLecture ? '!bg-blue-700' : isWe ? 'bg-slate-100/30' : ''}`}>
+                                                <div className="flex justify-between items-start mb-1 z-20">
+                                                    <span className={`text-base font-black ${!date ? 'opacity-0' : (isWe && ev?.isSpecialLecture) ? '!text-white' : isToday ? 'text-blue-600' : isWe ? 'text-blue-400' : 'text-slate-300'}`}>{date?.getDate()}</span>
+                                                    {date && <div className="flex gap-1 print:hidden z-30 opacity-60 group-hover:opacity-100 transition-opacity">
+                                                        {isWe && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isSpecialLecture'); }} className={`p-1 rounded shadow-sm ${ev?.isSpecialLecture ? 'text-yellow-400 bg-blue-800' : 'text-slate-400 bg-white border border-slate-200'}`}><LucideIcon name="star" size={18} /></button>}
+                                                        {(dow === 1 || dow === 5) && !isWe && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isAfterSchoolEnglish'); }} className={`p-1 rounded ${ev?.isAfterSchoolEnglish ? 'text-emerald-600 bg-emerald-50 ring-1 ring-emerald-200' : 'text-slate-400'}`}><LucideIcon name="book-open" size={16} /></button>}
+                                                        {dow === 3 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isChineseOnline'); }} className={`p-1 rounded ${ev?.isChineseOnline ? 'text-amber-600 bg-amber-50 ring-1 ring-amber-200' : 'text-slate-400'}`}><LucideIcon name="globe" size={16} /></button>}
+                                                        {(dow === 2 || dow === 4 || dow === 5) && !isWe && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isEnglishOnline'); }} className={`p-1 rounded ${ev?.isEnglishOnline ? 'text-purple-600 bg-purple-50 ring-1 ring-purple-200' : 'text-slate-400'}`}><LucideIcon name="globe" size={16} /></button>}
+                                                    </div>}
+                                                </div>
+                                                {!isWe && ev && ev.schoolName && <div className="flex-1 flex flex-col space-y-1.5 overflow-hidden z-10">
+                                                    <div className="text-[25px] font-black text-slate-900 leading-[1] tracking-tighter truncate">{ev.schoolName}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="text-[18px] font-black text-blue-700 bg-blue-50/50 px-1.5 py-0.5 rounded border border-blue-100">{ev.schoolType === '유치원' ? ev.kinderClass : `${ev.selectedGrades?.join(',')}학년${ev.selectedGrades?.length === 1 && ev.classNum !== '-' ? ' ' + ev.classNum + '반' : ''}`}</div>
+                                                        <div className="text-[18px] font-black text-emerald-600 flex items-center gap-0.5"><LucideIcon name="users" size={16} />{ev.people}</div>
+                                                    </div>
+                                                    <div className="text-[11px] font-bold text-slate-400 tracking-tight"><LucideIcon name="clock" size={10} className="inline mr-1" />{ev.startTime}-{ev.endTime}</div>
+                                                    {ev.note && <div className="pt-1.5 overflow-hidden"><div className={`${ev.note.length < 15 ? 'text-[18px]' : 'text-[13px]'} text-red-600 font-black leading-tight border-t-2 border-red-400 pt-1 truncate`}>{ev.note}</div></div>}
+                                                </div>}
+                                                <div className="mt-auto pt-1 space-y-0.5 z-10">
+                                                    {ev?.isAfterSchoolEnglish && <div className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1 rounded truncate border border-emerald-100">[{sessionCounters.isAfterSchoolEnglish[dStr]}회] 방과후</div>}
+                                                    {ev?.isChineseOnline && <div className="text-[9px] font-black text-amber-600 bg-amber-50 px-1 rounded truncate border border-amber-100">[{sessionCounters.isChineseOnline[dStr]}회] 중국어</div>}
+                                                    {ev?.isEnglishOnline && <div className="text-[9px] font-black text-purple-600 bg-purple-50 px-1 rounded truncate border border-purple-100">[{sessionCounters.isEnglishOnline[dStr]}회] 온라인</div>}
+                                                    {isWe && ev?.isSpecialLecture && <div className="flex-1 flex flex-col items-center justify-center py-6 text-white font-black text-center leading-tight">토요 글로벌<br/>언어특강<br/><span className="text-yellow-300 text-sm">[{sessionCounters.isSpecialLecture[dStr]}회차]</span></div>}
+                                                </div>
+                                                {!ev?.schoolName && !ev?.isSpecialLecture && date && !isWe && <div className="flex-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><LucideIcon name="plus" size={40} className="text-slate-100" /></div>}
+                                            </div>
+                                        );
+                                    }))}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in duration-300">
+                                <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center"><h2 className="text-xl font-black text-slate-800">{season.label} 신청 학교 명단</h2><div className="text-xs font-bold text-slate-500">학교 가나다순 정렬 ({listData.length}건)</div></div>
+                                <div className="overflow-x-auto"><table className="w-full text-left border-collapse"><thead><tr className="bg-slate-900 text-white text-[11px] font-black uppercase tracking-widest"><th className="px-6 py-4 text-center">학교명</th><th className="px-6 py-4">신청 일자</th><th className="px-6 py-4">대상 학년/반</th><th className="px-6 py-4">인원</th><th className="px-6 py-4">희망 시간</th><th className="px-6 py-4">특이사항</th></tr></thead><tbody className="divide-y divide-slate-100">{listData.map(e => (<tr key={e.id} onClick={() => openModal(e.date, e)} className="hover:bg-blue-50 transition-colors cursor-pointer group"><td className="px-6 py-4 text-base font-black text-slate-900 group-hover:text-blue-700 text-center">{e.schoolName}</td><td className="px-6 py-4 text-sm font-black text-blue-600">{e.date}</td><td className="px-6 py-4"><span className="bg-slate-100 px-2 py-1 rounded-lg text-xs font-bold text-slate-700">{e.schoolType === '유치원' ? e.kinderClass : `${e.selectedGrades?.join(',')}학년 ${e.classNum !== '-' ? e.classNum + '반' : ''}`}</span></td><td className="px-6 py-4 text-sm font-black text-emerald-600"><LucideIcon name="users" size={14} className="inline mr-1" />{e.people}명</td><td className="px-6 py-4 text-[11px] font-bold text-slate-500 tracking-tighter">{e.startTime} ~ {e.endTime}</td><td className="px-6 py-4 text-xs font-black text-red-600 max-w-[200px] truncate">{e.note || '-'}</td></tr>))}{listData.length === 0 && <tr><td colSpan="6" className="px-6 py-32 text-center text-slate-300 text-xl font-black uppercase tracking-widest italic">데이터 없음</td></tr>}</tbody></table></div>
+                            </div>
+                        )}
+                    </main>
+
+                    {isDeleteConfirmOpen && (
+                        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in zoom-in duration-150"><div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-slate-100"><div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500 animate-pulse-subtle"><LucideIcon name="alert-triangle" size={32} /></div><h3 className="text-xl font-black text-slate-900 mb-2">정말 삭제할까요?</h3><p className="text-slate-500 text-sm font-bold mb-8">모든 사용자의 화면에서 이 일정이 즉시 사라지며, 복구할 수 없습니다.</p><div className="flex gap-3"><button onClick={() => setIsDeleteConfirmOpen(false)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200 transition-all">취소</button><button onClick={deleteConfirmed} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black hover:bg-red-600 transition-all shadow-lg shadow-red-200">삭제 확정</button></div></div></div>
+                    )}
+
+                    {isModalOpen && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"><div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"><div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50"><h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2"><LucideIcon name="check-circle-2" size={18} className="text-blue-600" /> 학교 일정 {editingEvent ? '수정' : '등록'}</h2><button onClick={closeModal} className="p-1 hover:bg-slate-200 rounded-full transition-all active:scale-90"><LucideIcon name="x" size={20} /></button></div><form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar text-sm"><div className="bg-blue-50 px-3 py-2 rounded-xl text-blue-700 text-xs font-black flex justify-between items-center"><span>{selectedDate}</span><span className="opacity-60 underline">동시 편집 모드</span></div><div className="grid grid-cols-3 gap-3"><div className="col-span-1 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">학교급</label><select value={formData.schoolType} onChange={(e) => setFormData({...formData, schoolType: e.target.value})} className="w-full px-2 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-bold outline-none cursor-pointer"><option value="유치원">유치원</option><option value="초등학교">초등학교</option><option value="중학교">중학교</option></select></div><div className="col-span-2 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">학교명 (급 제외 입력)</label><input required type="text" value={formData.schoolName} onChange={(e) => setFormData({...formData, schoolName: e.target.value})} placeholder="학교 이름을 입력하세요" className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-black outline-none focus:bg-white transition-all shadow-inner" /></div></div><div className="bg-slate-100/50 p-4 rounded-3xl space-y-3 border border-slate-100 shadow-sm">{formData.schoolType !== '유치원' && (<div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase flex justify-between">학년 선택 <span>다중 선택 가능</span></label><div className="grid grid-cols-6 gap-1.5">{(formData.schoolType === '초등학교' ? [1,2,3,4,5,6] : [1,2,3]).map(n => <button key={n} type="button" onClick={() => { let news = [...formData.selectedGrades]; news = news.includes(n.toString()) ? news.filter(x => x !== n.toString()) : [...news, n.toString()]; setFormData({...formData, selectedGrades: news, classNum: news.length === 1 ? formData.classNum : '-'}); }} className={`py-1.5 rounded-xl text-[11px] font-black border transition-all ${formData.selectedGrades.includes(n.toString()) ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-100'}`}>{n}</button>)}</div></div>)}<div className="grid grid-cols-2 gap-3 items-end"><div className="space-y-1"><label className="text-[10px] font-black text-slate-500 uppercase">반 (단일학년 시)</label><select disabled={formData.selectedGrades.length !== 1} value={formData.classNum} onChange={(e) => setFormData({...formData, classNum: e.target.value})} className={`w-full px-3 py-1.5 rounded-xl border border-white bg-white font-bold text-xs shadow-sm ${formData.selectedGrades.length === 1 ? 'opacity-100' : 'opacity-40'}`}><option value="-">-</option>{[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}반</option>)}<option value="통합">통합</option></select></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-500 uppercase">인원수</label><input type="text" value={formData.people} onChange={(e) => setFormData({...formData, people: e.target.value})} className="w-full px-3 py-1.5 rounded-xl border border-white bg-white font-bold text-xs shadow-sm" /></div></div></div><div className="grid grid-cols-2 gap-4"><div className="bg-blue-50/30 p-3 rounded-2xl border border-blue-50 space-y-2 shadow-sm"><div className="flex justify-between text-[10px] font-black text-blue-400 uppercase tracking-widest"><span>시작</span> <span className="text-blue-700">{startTimeOptions[formData.startTimeIdx]}</span></div><input type="range" min="0" max={startTimeOptions.length - 1} step="1" value={formData.startTimeIdx} onChange={(e) => setFormData({...formData, startTimeIdx: parseInt(e.target.value)})} className="w-full h-1.5 bg-blue-100 rounded-lg appearance-none cursor-pointer accent-blue-600" /></div><div className="bg-emerald-50/30 p-3 rounded-2xl border border-emerald-50 space-y-2 shadow-sm"><div className="flex justify-between text-[10px] font-black text-emerald-400 uppercase tracking-widest"><span>종료</span> <span className="text-emerald-700">{endTimeOptions[formData.endTimeIdx]}</span></div><input type="range" min="0" max={endTimeOptions.length - 1} step="1" value={formData.endTimeIdx} onChange={(e) => setFormData({...formData, endTimeIdx: parseInt(e.target.value)})} className="w-full h-1.5 bg-emerald-100 rounded-lg appearance-none cursor-pointer accent-emerald-600" /></div></div><div className="space-y-1"><label className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1"><LucideIcon name="alert-circle" size={10} /> 특이사항 (달력 빨간 강조)</label><input type="text" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="여기에 메모를 입력하세요" className="w-full px-4 py-2.5 rounded-xl border border-red-50 bg-red-50/20 font-black text-red-600 text-sm outline-none focus:ring-1 focus:ring-red-500 transition-all shadow-inner" /></div><div className="pt-2 flex gap-3">{editingEvent && <button type="button" onClick={() => setIsDeleteConfirmOpen(true)} className="p-3 text-red-500 hover:bg-red-50 rounded-xl border border-red-100 shadow-sm active:scale-90 transition-all"><LucideIcon name="trash-2" size={18} /></button>}<button type="submit" className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-black text-sm hover:bg-black transition-all shadow-xl active:scale-[0.98]">일정 저장 (공용 반영)</button></div></form></div></div>
+                    )}
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
