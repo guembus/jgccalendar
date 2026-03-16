@@ -10,6 +10,8 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- CSV 파서 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
         
@@ -24,8 +26,6 @@
         }
 
         #root { height: 100%; display: flex; flex-direction: column; }
-
-        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #2563eb; cursor: pointer; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -62,9 +62,6 @@
 
         const { useState, useEffect, useMemo, useRef, Fragment } = React;
 
-        // ============================================================================
-        // ⭐️⭐️⭐️ 파이어베이스 환경 설정 (FIREBASE CONFIGURATION) ⭐️⭐️⭐️
-        // ============================================================================
         const myFirebaseConfig = {
             apiKey: "AIzaSyDcgyT68OxF6AvkOqStl3fl-1iqZaQ-uoY",
             authDomain: "jgccalendar-d84b6.firebaseapp.com",
@@ -73,14 +70,11 @@
             messagingSenderId: "797056526732",
             appId: "1:797056526732:web:b53ddf064101b1cc1fcea9"
         };
-        
         const finalConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : myFirebaseConfig;
-        
         const app = initializeApp(finalConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'program-manager-2026';
-        // ============================================================================
 
         const Icon = ({ name, size = 16, className = "" }) => {
             const icons = {
@@ -94,15 +88,19 @@
                 star: 'm12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
                 users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
                 globe: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-20c.535 0 1.056.042 1.564.122A14.975 14.975 0 0115.82 12a14.975 14.975 0 01-2.256 9.878A9.975 9.975 0 0112 22a9.975 9.975 0 01-1.564-.122A14.975 14.975 0 008.18 12a14.975 14.975 0 002.256-9.878A9.975 9.975 0 0112 2zm-8.9 9.1h17.8M3.1 14.9h17.8',
-                book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5V4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5z',
+                book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20M4 19.5V4.5A2.5 2.5 0 0 1 6.5 22H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5z',
                 alert: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-14v4m0 4h.01',
                 check: 'M20 6 9 17l-5-5',
                 layout: 'M3 3h18v18H3V3zm0 6h18M9 9v12',
                 list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
-                clock: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-16v6l4 2',
                 copy: 'M8 8H4v12h12v-4M16 4H8v12h12V4h-4z',
                 settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 1 0-6 3 3 0 0 1 0 6z',
-                edit: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'
+                edit: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z',
+                flag: 'M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7',
+                upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
+                save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8V3',
+                refresh: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5',
+                downloadCloud: 'M8 17l4 4 4-4M12 12v9M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29'
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -115,8 +113,21 @@
             isAfterSchoolEnglish: { name: '방과후 영어', days: [1, 5] },
             isChineseOnline: { name: '중국어 온라인', days: [3] },
             isEnglishOnline: { name: '영어 온라인', days: [2, 4, 5] },
+            isExtra1: { name: '', days: [] },
+            isExtra2: { name: '', days: [] },
+            isExtra3: { name: '', days: [] },
             isSpecialLecture: { name: '토요특강', days: [6] }
         };
+
+        const toggleConfigs = [
+            { key: 'isAfterSchoolEnglish', defaultIcon: 'book', color: 'text-emerald-600 bg-emerald-50' },
+            { key: 'isChineseOnline', defaultIcon: 'globe', color: 'text-amber-600 bg-amber-50' },
+            { key: 'isEnglishOnline', defaultIcon: 'globe', color: 'text-purple-600 bg-purple-50' },
+            { key: 'isExtra1', defaultIcon: 'flag', color: 'text-indigo-600 bg-indigo-50' },
+            { key: 'isExtra2', defaultIcon: 'flag', color: 'text-teal-600 bg-teal-50' },
+            { key: 'isExtra3', defaultIcon: 'flag', color: 'text-rose-600 bg-rose-50' },
+            { key: 'isSpecialLecture', defaultIcon: 'star', color: 'text-yellow-500 bg-blue-800', isFixed: true }
+        ];
 
         const App = () => {
             const [user, setUser] = useState(null);
@@ -124,19 +135,15 @@
             const [currentDate, setCurrentDate] = useState(new Date(2026, 2, 1));
             const [events, setEvents] = useState([]);
             const [settings, setSettings] = useState(defaultSettings);
+            const [backups, setBackups] = useState([]);
             
-            // 모달 관리
+            const [sysDialog, setSysDialog] = useState(null);
+            
             const [isModalOpen, setIsModalOpen] = useState(false);
-            const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
             const [detailModalData, setDetailModalData] = useState(null); 
-            
-            // 설정 모달
             const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
             const [tempSettings, setTempSettings] = useState(defaultSettings);
             const [editingKey, setEditingKey] = useState(null);
-            const [pendingSettingsSave, setPendingSettingsSave] = useState(null);
-            
-            // 기능: 휴일 지정 모드 (단순 클릭 토글)
             const [isHolidayMode, setIsHolidayMode] = useState(false);
             
             const [selectedDate, setSelectedDate] = useState(null);
@@ -148,19 +155,10 @@
             const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
             const wheelTimeout = useRef(null);
             const touchStart = useRef(null);
+            const fileInputRef = useRef(null);
 
-            const initialForm = { schoolType: '초등학교', schoolName: '', selectedGrades: ['3'], classNum: '-', kinderClass: '', startTimeIdx: 3, endTimeIdx: 6, people: '20', note: '' };
+            const initialForm = { eventType: '정규', schoolType: '초등학교', schoolName: '', selectedGrades: ['3'], classNum: '-', people: '20', note: '' };
             const [formData, setFormData] = useState(initialForm);
-
-            const startTimeOptions = useMemo(() => {
-                const opts = []; for (let m = 0; m <= 60; m += 10) opts.push(`09:${String(m).padStart(2, '0')}`);
-                opts[opts.length-1] = "10:00"; return opts;
-            }, []);
-
-            const endTimeOptions = useMemo(() => {
-                const opts = []; for (let h = 11; h <= 13; h++) { for (let m = 0; m < 60; m += 10) opts.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`); }
-                opts.push("13:00"); return Array.from(new Set(opts));
-            }, []);
 
             const season = useMemo(() => {
                 const y = currentDate.getFullYear(), m = currentDate.getMonth();
@@ -179,10 +177,12 @@
             }, [seasonEvents]);
 
             const sessionCounters = useMemo(() => {
-                const counters = { isSpecialLecture: {}, isAfterSchoolEnglish: {}, isChineseOnline: {}, isEnglishOnline: {} };
-                ['isSpecialLecture', 'isAfterSchoolEnglish', 'isChineseOnline', 'isEnglishOnline'].forEach(f => {
-                    const active = seasonEvents.filter(e => e[f] === true).sort((a, b) => a.date.localeCompare(b.date));
-                    active.forEach((e, i) => { counters[f][e.date] = i + 1; });
+                const counters = {};
+                toggleConfigs.forEach(conf => counters[conf.key] = {});
+                
+                toggleConfigs.forEach(conf => {
+                    const active = seasonEvents.filter(e => e[conf.key] === true).sort((a, b) => a.date.localeCompare(b.date));
+                    active.forEach((e, i) => { counters[conf.key][e.date] = i + 1; });
                 });
                 return counters;
             }, [seasonEvents]);
@@ -202,7 +202,6 @@
                 return w;
             }, [currentDate]);
 
-            // 주중 마스터 토글 상태 판별
             const isMasterOn = useMemo(() => {
                 const currentMonthDays = calendarWeeks.flat().filter(d => d && d.sat === undefined && d.getMonth() === currentDate.getMonth());
                 let hasExpected = false; let allOn = true;
@@ -213,9 +212,13 @@
                     const ev = events.find(e => e.date === dStr);
                     if (ev?.isHoliday) return;
 
-                    if (settings.isAfterSchoolEnglish.days.includes(dow)) { hasExpected = true; if (!ev?.isAfterSchoolEnglish) allOn = false; }
-                    if (settings.isChineseOnline.days.includes(dow)) { hasExpected = true; if (!ev?.isChineseOnline) allOn = false; }
-                    if (settings.isEnglishOnline.days.includes(dow)) { hasExpected = true; if (!ev?.isEnglishOnline) allOn = false; }
+                    toggleConfigs.forEach(conf => {
+                        if (conf.isFixed) return;
+                        if (settings[conf.key]?.days?.includes(dow)) {
+                            hasExpected = true;
+                            if (!ev?.[conf.key]) allOn = false;
+                        }
+                    });
                 });
                 return hasExpected && allOn;
             }, [calendarWeeks, currentDate, events, settings]);
@@ -244,19 +247,34 @@
             useEffect(() => {
                 if (!user) return;
                 const eventsRef = collection(db, 'artifacts', appId, 'public', 'data', 'events');
-                const unsub = onSnapshot(eventsRef, (snap) => {
-                    setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                });
-                return () => unsub();
+                const unsubEvents = onSnapshot(eventsRef, 
+                    (snap) => { setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() }))); },
+                    (error) => { console.error("Events fetch error:", error); }
+                );
+                
+                const backupsRef = collection(db, 'artifacts', appId, 'public', 'data', 'backups');
+                const unsubBackups = onSnapshot(backupsRef, 
+                    (snap) => {
+                        const bks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                        bks.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+                        setBackups(bks);
+                    },
+                    (error) => { console.error("Backups fetch error:", error); }
+                );
+
+                return () => { unsubEvents(); unsubBackups(); };
             }, [user]);
 
             useEffect(() => {
                 if (!user) return;
                 const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', season.year);
-                const unsubSettings = onSnapshot(settingsRef, (snap) => {
-                    if (snap.exists()) setSettings({ ...defaultSettings, ...snap.data() });
-                    else setSettings(defaultSettings);
-                });
+                const unsubSettings = onSnapshot(settingsRef, 
+                    (snap) => {
+                        if (snap.exists()) setSettings({ ...defaultSettings, ...snap.data() });
+                        else setSettings(defaultSettings);
+                    },
+                    (error) => { console.error("Settings fetch error:", error); }
+                );
                 return () => unsubSettings();
             }, [user, season.year]);
 
@@ -270,20 +288,311 @@
             const handleTouchEnd = (e) => {
                 if (!touchStart.current) return;
                 const diff = touchStart.current - e.changedTouches[0].clientX;
-                if (Math.abs(diff) > 50) {
-                    setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + (diff > 0 ? 1 : -1), 1));
-                }
+                if (Math.abs(diff) > 50) setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + (diff > 0 ? 1 : -1), 1));
                 touchStart.current = null;
             };
 
             const handleWheel = (e) => {
-                // 명단 탭(list)일 때는 휠로 달이 넘어가지 않도록 예외 처리 추가
                 if (isMobile || activeTab === 'list' || wheelTimeout.current || Math.abs(e.deltaY) < 10) return;
                 setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + (e.deltaY > 0 ? 1 : -1), 1));
                 wheelTimeout.current = setTimeout(() => { wheelTimeout.current = null; }, 300);
             };
 
+            // 프린트 기능 샌드박스 정책 우회 및 안내 로직
+            const handlePrint = () => {
+                try {
+                    window.focus();
+                    window.print();
+                } catch (e) {
+                    setSysDialog({ type: 'alert', title: '프린트 오류', message: '현재 환경(미리보기 캔버스)에서는 브라우저 보안 정책으로 인해 프린트 버튼이 작동하지 않을 수 있습니다.\n\n키보드 단축키(Ctrl + P 또는 Cmd + P)를 이용해주세요.', isError: true });
+                }
+            };
+
             const getEventDocRef = (dateStr) => doc(db, 'artifacts', appId, 'public', 'data', 'events', dateStr);
+
+            const createBackup = async (label) => {
+                if (!user) return;
+                const backupId = new Date().toISOString().replace(/[:.]/g, '-');
+                const backupRef = doc(db, 'artifacts', appId, 'public', 'data', 'backups', backupId);
+                await setDoc(backupRef, { timestamp: new Date().toISOString(), label: label, data: events });
+            };
+
+            const requestRestoreBackup = (backupId) => {
+                const targetBackup = backups.find(b => b.id === backupId);
+                if (!targetBackup) return;
+
+                setSysDialog({
+                    type: 'confirm',
+                    title: '달력 복원 경고',
+                    message: `[${targetBackup.label}] 시점으로 달력을 되돌리시겠습니까?\n현재 등록된 일정은 모두 덮어씌워집니다.`,
+                    isError: true,
+                    onConfirm: () => restoreBackup(backupId)
+                });
+            };
+
+            const restoreBackup = async (backupId) => {
+                if (!user) return;
+                const targetBackup = backups.find(b => b.id === backupId);
+                if (!targetBackup) return;
+
+                const batch = writeBatch(db);
+                events.forEach(ev => batch.delete(getEventDocRef(ev.date)));
+                targetBackup.data.forEach(ev => batch.set(getEventDocRef(ev.date), ev));
+
+                await batch.commit();
+                setSysDialog({ type: 'alert', title: '복원 완료', message: '성공적으로 이전 시점으로 복원되었습니다.', isError: false });
+            };
+
+            // ==========================================================
+            // 다운로드 및 향상된 엑셀 업로드 파서
+            // ==========================================================
+            const downloadTemplate = () => {
+                const csvContent = "연번,신청 프로그램명,학교명,신청자,교육희망일,희망학급,인원,구체적 활동\n1,영어 체험학습,행복초등학교,홍길동(3학년 1반),2026-05-15,3학년,20,원어민 보조교사 수업\n2,기타 프로그램,우주중학교,김철수,2026-06-20,1학년,15,프로그램 예시입니다";
+                const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.setAttribute("href", url);
+                link.setAttribute("download", "일정업로드_표준양식.csv");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const handleUploadButtonClick = () => {
+                if (typeof Papa === 'undefined') {
+                    setSysDialog({ type: 'alert', title: '시스템 오류', message: 'CSV 파서 모듈이 아직 로드되지 않았습니다. 2~3초 후 다시 시도해주세요.', isError: true });
+                    return;
+                }
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                fileInputRef.current?.click();
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                setSysDialog({
+                    type: 'confirm',
+                    title: '엑셀 데이터 자동 작성',
+                    message: `[${file.name}]\n\n업로드를 시작합니다.\n프로그램명에 '영어'가 포함된 항목만 추출되며, 겹치는 일정은 특이사항에 안전하게 병합됩니다.\n(업로드 전 현재 달력은 자동 백업됩니다)`,
+                    isError: false,
+                    onConfirm: () => processFileUpload(file)
+                });
+            };
+
+            const processFileUpload = async (file) => {
+                const showResult = (msg, isError = false) => {
+                    setSysDialog({ type: 'alert', title: isError ? '업로드 실패' : '업로드 성공', message: msg, isError });
+                };
+
+                const readFileAsText = (f, encoding) => new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = ev => resolve(ev.target.result);
+                    reader.onerror = ev => reject(ev);
+                    reader.readAsText(f, encoding);
+                });
+
+                try {
+                    let csvText = await readFileAsText(file, 'euc-kr');
+                    if (!csvText.includes('학교') && !csvText.includes('신청')) {
+                        csvText = await readFileAsText(file, 'utf-8');
+                    }
+
+                    const parseDateString = (str) => {
+                        if (!str) return null;
+                        const nums = str.match(/\d+/g); 
+                        if (!nums || nums.length < 3) return null;
+                        let y, m, d;
+                        if (nums[0].length === 4) {
+                            y = nums[0]; m = nums[1]; d = nums[2];
+                        } else if (nums[2].length === 4) {
+                            m = nums[0]; d = nums[1]; y = nums[2];
+                        } else {
+                            return null;
+                        }
+                        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+                    };
+
+                    Papa.parse(csvText, {
+                        header: false,
+                        skipEmptyLines: true,
+                        complete: async (results) => {
+                            try {
+                                const rawData = results.data;
+                                
+                                if (!rawData || rawData.length === 0) {
+                                    showResult("파일 내에 읽을 수 있는 데이터가 전혀 없습니다.", true);
+                                    return;
+                                }
+
+                                let headerIdx = -1;
+                                for (let i = 0; i < rawData.length; i++) {
+                                    const rowString = rawData[i].join('').replace(/\s/g, '');
+                                    if (rowString.includes('신청프로그램명')) {
+                                        headerIdx = i; 
+                                        break;
+                                    }
+                                }
+
+                                if (headerIdx === -1) {
+                                    showResult(`'신청 프로그램명' 이라는 열 제목(헤더)을 찾을 수 없습니다.\n해결방법: 우측 상단의 [양식 다운] 버튼을 눌러 표준 양식을 사용해보세요.`, true);
+                                    return;
+                                }
+
+                                const headers = rawData[headerIdx].map(h => h ? h.trim() : '');
+                                const programNameKey = headers.find(h => h.replace(/\s/g, '') === '신청프로그램명') || '신청 프로그램명';
+                                const schoolNameKey = headers.find(h => h.replace(/\s/g, '') === '학교명') || '학교명';
+                                const dateKey = headers.find(h => h.replace(/\s/g, '') === '교육희망일') || '교육희망일';
+                                const applicantKey = headers.find(h => h.includes('신청자')) || '신청자';
+                                const gradesKey = headers.find(h => h.includes('학급')) || '희망학급';
+                                const peopleKey = headers.find(h => h.includes('인원')) || '인원';
+                                const actKey = headers.find(h => h.includes('활동')) || '구체적 활동';
+                                const seqKey = headers.find(h => h.includes('연번')) || '연번';
+
+                                const rows = rawData.slice(headerIdx + 1).map(row => {
+                                    let obj = {};
+                                    row.forEach((val, i) => {
+                                        if(headers[i]) obj[headers[i]] = val ? String(val).trim() : '';
+                                    });
+                                    return obj;
+                                });
+
+                                const englishRows = rows.filter(r => r[programNameKey] && r[programNameKey].includes('영어'));
+
+                                if (englishRows.length === 0) {
+                                    showResult("파일 안의 데이터 중 프로그램명에 '영어'라는 단어가 포함된 신청건이 단 한 건도 없습니다.", true);
+                                    return;
+                                }
+
+                                englishRows.sort((a, b) => {
+                                    const seqA = parseInt(a[seqKey]) || 0;
+                                    const seqB = parseInt(b[seqKey]) || 0;
+                                    return seqA - seqB;
+                                });
+
+                                await createBackup(`엑셀 업로드 직전 (${file.name})`);
+
+                                const batch = writeBatch(db);
+                                const processedEvents = new Map(); 
+                                let successCount = 0;
+
+                                englishRows.forEach(row => {
+                                    const dateStr = parseDateString(row[dateKey]);
+                                    if (!dateStr) return; 
+
+                                    successCount++;
+
+                                    let sName = row[schoolNameKey] || '';
+                                    
+                                    // 학급 및 신청자 정보 통합 (유치원 식별 및 반 추출용)
+                                    const rawApplicant = (row[applicantKey] || '').replace(/통합반?/g, '');
+                                    const rawClass = (row[gradesKey] || '').replace(/통합반?/g, '');
+                                    const combinedText = rawApplicant + " " + rawClass;
+
+                                    let sType = '초등학교';
+                                    if (sName.includes('유치원') || combinedText.includes('유치원')) {
+                                        sType = '유치원';
+                                    } else if (sName.includes('중학교') || combinedText.includes('중학교')) {
+                                        sType = '중학교';
+                                    }
+
+                                    let baseName = sName.replace(/(초등학교|중학교|유치원|초|중|유)$/, '').trim();
+                                    const suffix = sType === '유치원' ? '유치원' : sType === '초등학교' ? '초' : '중';
+                                    const finalName = baseName + suffix;
+                                    
+                                    let grades = [];
+                                    let classNum = '-';
+
+                                    if (sType !== '유치원') {
+                                        if (combinedText.includes('전학년')) {
+                                            grades = sType === '초등학교' ? ['1','2','3','4','5','6'] : ['1','2','3'];
+                                        } else {
+                                            const dateBugMatch = combinedText.match(/\b(0?[1-6])[-./](0?[1-9]|[12]\d|3[01])\b/);
+                                            const rangeMatch = combinedText.match(/(0?[1-6])\s*[~-]\s*(0?[1-6])\s*학년/);
+
+                                            if (dateBugMatch) {
+                                                grades = [parseInt(dateBugMatch[1], 10).toString()];
+                                                classNum = parseInt(dateBugMatch[2], 10).toString();
+                                            } else if (rangeMatch) {
+                                                let start = parseInt(rangeMatch[1], 10);
+                                                let end = parseInt(rangeMatch[2], 10);
+                                                if (start > end) { let temp = start; start = end; end = temp; }
+                                                for (let g = start; g <= end; g++) {
+                                                    grades.push(g.toString());
+                                                }
+                                            } else {
+                                                const gradeMatches = combinedText.match(/([1-6])\s*학년/g);
+                                                if (gradeMatches) {
+                                                    grades = gradeMatches.map(m => m.match(/\d/)[0]);
+                                                } else {
+                                                    const digitMatches = combinedText.match(/[1-6]/g);
+                                                    if (digitMatches) grades = [...new Set(digitMatches)];
+                                                }
+                                                
+                                                const classMatch = combinedText.match(/([1-9][0-9]?)\s*반/);
+                                                if (classMatch && grades.length === 1) {
+                                                    classNum = classMatch[1];
+                                                }
+                                            }
+                                            grades = [...new Set(grades)].filter(g => parseInt(g) >= 1 && parseInt(g) <= 6);
+                                        }
+                                    }
+
+                                    const people = row[peopleKey] || '0';
+                                    const activity = row[actKey] || '';
+                                    const note = activity ? activity : '';
+
+                                    let existingEvent = processedEvents.get(dateStr) || events.find(e => e.date === dateStr);
+
+                                    if (existingEvent && (existingEvent.schoolName || existingEvent.isHoliday)) {
+                                        if (existingEvent.isHoliday) return; 
+                                        
+                                        const currentNote = existingEvent.note || '';
+                                        const appendMsg = `[추가] ${finalName}(${people}명)${activity ? ' - ' + activity : ''}`;
+                                        const newNote = currentNote ? `${currentNote} | ${appendMsg}` : appendMsg;
+                                        
+                                        existingEvent = { ...existingEvent, note: newNote, updatedAt: new Date().toISOString() };
+                                    } else {
+                                        existingEvent = {
+                                            eventType: '정규',
+                                            schoolType: sType,
+                                            schoolName: finalName,
+                                            selectedGrades: grades,
+                                            classNum: classNum,
+                                            people: people,
+                                            note: note,
+                                            date: dateStr,
+                                            updatedAt: new Date().toISOString()
+                                        };
+                                    }
+                                    processedEvents.set(dateStr, existingEvent);
+                                });
+
+                                if (successCount === 0) {
+                                    showResult("영어 일정은 찾았으나, 날짜(교육희망일) 항목이 비어있거나 시스템이 인식할 수 없는 양식입니다.", true);
+                                    return;
+                                }
+
+                                processedEvents.forEach((evData, dateStr) => {
+                                    batch.set(getEventDocRef(dateStr), evData, { merge: true });
+                                });
+
+                                await batch.commit();
+                                showResult(`총 ${successCount}건의 영어 일정이 달력에 완벽히 반영되었습니다.\n(같은 날짜에 여러 학교가 겹치는 경우, 특이사항 영역에 안전하게 병합되었습니다.)`, false);
+
+                            } catch(err) {
+                                showResult(`엑셀 데이터를 분석하는 중 내부 오류가 발생했습니다.\n에러 내용: ${err.message}`, true);
+                                console.error(err);
+                            }
+                        },
+                        error: (error) => {
+                            showResult(`파일 구조가 손상되었거나 파싱할 수 없습니다.\n${error.message}`, true);
+                        }
+                    });
+                } catch (error) {
+                    showResult(`시스템이 파일을 정상적으로 읽지 못했습니다.\n에러 내용: ${error.message}`, true);
+                }
+            };
 
             const toggleAct = async (dStr, cur, f) => {
                 if (!user || isMobile || isHolidayMode) return; 
@@ -291,28 +600,18 @@
                 await setDoc(getEventDocRef(dStr), data, { merge: true });
             };
 
-            // ====== 단일 날짜 휴일 토글 함수 ======
             const toggleHoliday = async (dateStr, ev) => {
                 if (!user || !dateStr) return;
                 const ref = getEventDocRef(dateStr);
                 if (ev?.isHoliday) {
-                    // 휴일 해제
                     await setDoc(ref, { isHoliday: deleteField() }, { merge: true });
                 } else {
-                    // 휴일 지정 (기존 데이터 일괄 삭제 및 date 필드 추가)
-                    await setDoc(ref, {
-                        date: dateStr,
-                        isHoliday: true,
-                        schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(),
-                        classNum: deleteField(), people: deleteField(), note: deleteField(),
-                        startTime: deleteField(), endTime: deleteField(),
-                        isAfterSchoolEnglish: deleteField(), isChineseOnline: deleteField(),
-                        isEnglishOnline: deleteField(), isSpecialLecture: deleteField()
-                    }, { merge: true });
+                    let deleteFields = { date: dateStr, isHoliday: true, schoolName: deleteField(), eventType: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(), classNum: deleteField(), people: deleteField(), note: deleteField() };
+                    toggleConfigs.forEach(conf => deleteFields[conf.key] = deleteField());
+                    await setDoc(ref, deleteFields, { merge: true });
                 }
             };
 
-            // ====== 마스터 일괄 토글 로직 ======
             const toggleMasterEvents = async () => {
                 if (!user) return;
                 const currentMonthDays = calendarWeeks.flat().filter(d => d && d.sat === undefined && d.getMonth() === currentDate.getMonth());
@@ -330,24 +629,24 @@
                     if (turnOn) {
                         let dataToSet = { date: dStr };
                         let hasUpdate = false;
-                        if (settings.isAfterSchoolEnglish.days.includes(dow)) { dataToSet.isAfterSchoolEnglish = true; hasUpdate = true; }
-                        if (settings.isChineseOnline.days.includes(dow)) { dataToSet.isChineseOnline = true; hasUpdate = true; }
-                        if (settings.isEnglishOnline.days.includes(dow)) { dataToSet.isEnglishOnline = true; hasUpdate = true; }
+                        toggleConfigs.forEach(conf => {
+                            if (!conf.isFixed && settings[conf.key]?.days?.includes(dow)) {
+                                dataToSet[conf.key] = true;
+                                hasUpdate = true;
+                            }
+                        });
                         if (hasUpdate) batch.set(ref, dataToSet, { merge: true });
                     } else {
                         if (ev) {
-                            batch.set(ref, {
-                                isAfterSchoolEnglish: deleteField(),
-                                isChineseOnline: deleteField(),
-                                isEnglishOnline: deleteField()
-                            }, { merge: true });
+                            let fieldsToDelete = {};
+                            toggleConfigs.forEach(conf => { if (!conf.isFixed) fieldsToDelete[conf.key] = deleteField(); });
+                            batch.set(ref, fieldsToDelete, { merge: true });
                         }
                     }
                 });
                 await batch.commit();
             };
 
-            // ====== 설정 저장 관련 로직 ======
             const openSettingsModal = () => {
                 setTempSettings(JSON.parse(JSON.stringify(settings)));
                 setEditingKey(null);
@@ -357,17 +656,30 @@
             const requestSettingsSave = () => {
                 const changed = [];
                 Object.keys(defaultSettings).forEach(k => {
-                    if (settings[k].name !== tempSettings[k].name || JSON.stringify(settings[k].days) !== JSON.stringify(tempSettings[k].days)) {
+                    const currentName = settings[k]?.name || '';
+                    const currentDays = JSON.stringify(settings[k]?.days || []);
+                    const tempName = tempSettings[k]?.name || '';
+                    const tempDays = JSON.stringify(tempSettings[k]?.days || []);
+                    if (currentName !== tempName || currentDays !== tempDays) {
                         changed.push(k);
                     }
                 });
-                if (changed.length > 0) setPendingSettingsSave({ newSettings: tempSettings, changedKeys: changed });
-                else setIsSettingsModalOpen(false);
+                if (changed.length > 0) {
+                    setSysDialog({
+                        type: 'confirm',
+                        title: '변경 사항 적용 경고',
+                        message: `이름이나 요일 배치가 변경된 항목의 기존 등록된 일정(토글) 기록이 모두 삭제됩니다.\n그래도 적용하시겠습니까?`,
+                        isError: true,
+                        onConfirm: () => confirmSettingsSave({ newSettings: tempSettings, changedKeys: changed })
+                    });
+                } else {
+                    setIsSettingsModalOpen(false);
+                }
             };
 
-            const confirmSettingsSave = async () => {
-                if (!pendingSettingsSave || !user) return;
-                const { newSettings, changedKeys } = pendingSettingsSave;
+            const confirmSettingsSave = async (payload) => {
+                if (!user) return;
+                const { newSettings, changedKeys } = payload;
                 const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', season.year);
                 await setDoc(settingsRef, newSettings, { merge: true });
 
@@ -377,42 +689,67 @@
                         await updateDoc(getEventDocRef(ev.date), { [key]: deleteField() });
                     }
                 }
-                setPendingSettingsSave(null);
                 setIsSettingsModalOpen(false);
             };
 
             const toggleTempDay = (key, dayInt) => {
                 setTempSettings(prev => {
-                    const currentDays = prev[key].days;
+                    const currentDays = prev[key]?.days || [];
                     const newDays = currentDays.includes(dayInt) ? currentDays.filter(d => d !== dayInt) : [...currentDays, dayInt].sort();
-                    return { ...prev, [key]: { ...prev[key], days: newDays } };
+                    return { ...prev, [key]: { ...(prev[key] || {}), days: newDays } };
                 });
             };
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!user) return;
-                const suffix = formData.schoolType === '유치원' ? '유' : formData.schoolType === '초등학교' ? '초' : '중';
-                let base = formData.schoolName.trim().replace(/(초등학교|중학교|유치원|초|중|유)$/, '');
-                const isKinder = formData.schoolType === '유치원';
 
-                const data = { 
-                    schoolName: base + suffix, schoolType: formData.schoolType,
-                    selectedGrades: isKinder ? [] : formData.selectedGrades, classNum: isKinder ? '-' : formData.classNum,
-                    startTime: startTimeOptions[formData.startTimeIdx], endTime: endTimeOptions[formData.endTimeIdx], 
-                    people: formData.people, note: formData.note, date: selectedDate, updatedAt: new Date().toISOString() 
-                };
+                let data;
+                if (formData.eventType === '기타') {
+                    data = {
+                        eventType: '기타',
+                        schoolName: formData.schoolName, 
+                        date: selectedDate,
+                        updatedAt: new Date().toISOString()
+                    };
+                    data.schoolType = deleteField();
+                    data.selectedGrades = deleteField();
+                    data.classNum = deleteField();
+                    data.people = deleteField();
+                    data.note = deleteField();
+                } else {
+                    const suffix = formData.schoolType === '유치원' ? '유치원' : formData.schoolType === '초등학교' ? '초' : '중';
+                    let base = formData.schoolName.trim().replace(/(초등학교|중학교|유치원|초|중|유)$/, '');
+                    const isKinder = formData.schoolType === '유치원';
+
+                    data = { 
+                        eventType: '정규',
+                        schoolName: base + suffix, schoolType: formData.schoolType,
+                        selectedGrades: isKinder ? [] : formData.selectedGrades, classNum: isKinder ? '-' : formData.classNum,
+                        people: formData.people, note: formData.note, date: selectedDate, updatedAt: new Date().toISOString() 
+                    };
+                }
                 await setDoc(getEventDocRef(selectedDate), data, { merge: true });
                 closeModal();
+            };
+
+            const requestDelete = () => {
+                setSysDialog({
+                    type: 'confirm',
+                    title: '삭제할까요?',
+                    message: '선택한 날짜의 정규/기타 일정이 삭제됩니다.',
+                    isError: true,
+                    onConfirm: deleteConfirmed
+                });
             };
 
             const deleteConfirmed = async () => {
                 if (!user || !selectedDate) return;
                 await updateDoc(getEventDocRef(selectedDate), {
-                    schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(), classNum: deleteField(),
-                    people: deleteField(), note: deleteField(), startTime: deleteField(), endTime: deleteField()
+                    eventType: deleteField(), schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(), classNum: deleteField(),
+                    people: deleteField(), note: deleteField()
                 });
-                setIsDeleteConfirmOpen(false); closeModal();
+                closeModal();
             };
 
             const handleDragStart = (e, date) => { if (isMobile || isHolidayMode) return; setDraggedDate(date); e.currentTarget.classList.add('dragging'); };
@@ -422,19 +759,19 @@
                 if (isMobile || isHolidayMode || !draggedDate || !user || draggedDate === targetDate) return;
                 const sourceData = events.find(ev => ev.date === draggedDate);
                 const targetData = events.find(ev => ev.date === targetDate);
-                if (targetData && (targetData.schoolName || targetData.isHoliday)) { alert("해당 날짜에 일정이 있거나 휴일입니다."); return; }
+                if (targetData && (targetData.schoolName || targetData.isHoliday)) return;
                 
                 const moveData = {
+                    eventType: sourceData.eventType || '정규',
                     schoolName: sourceData.schoolName, schoolType: sourceData.schoolType,
                     selectedGrades: sourceData.selectedGrades, classNum: sourceData.classNum,
                     people: sourceData.people, note: sourceData.note,
-                    startTime: sourceData.startTime, endTime: sourceData.endTime,
                     date: targetDate, updatedAt: new Date().toISOString()
                 };
                 await setDoc(getEventDocRef(targetDate), moveData, { merge: true });
                 await updateDoc(getEventDocRef(draggedDate), {
-                    schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(), classNum: deleteField(),
-                    people: deleteField(), note: deleteField(), startTime: deleteField(), endTime: deleteField()
+                    eventType: deleteField(), schoolName: deleteField(), schoolType: deleteField(), selectedGrades: deleteField(), classNum: deleteField(),
+                    people: deleteField(), note: deleteField()
                 });
                 setDraggedDate(null);
             };
@@ -451,7 +788,7 @@
             const pasteEvent = async (targetDate) => {
                 if (!copiedEvent || !user) return;
                 const existing = events.find(ev => ev.date === targetDate);
-                if (existing && (existing.schoolName || existing.isHoliday)) { alert("해당 날짜에 일정이 있거나 휴일입니다."); return; }
+                if (existing && (existing.schoolName || existing.isHoliday)) return;
                 
                 const { id, ...eventDataToPaste } = copiedEvent;
                 const pasteData = { ...eventDataToPaste, date: targetDate, updatedAt: new Date().toISOString() };
@@ -471,8 +808,8 @@
                 setSelectedDate(d);
                 if (ev && ev.schoolName) {
                     setEditingEvent(ev);
-                    let name = (ev.schoolName || '').replace(/(유|초|중)$/, '');
-                    setFormData({ ...ev, schoolName: name, startTimeIdx: startTimeOptions.indexOf(ev.startTime) !== -1 ? startTimeOptions.indexOf(ev.startTime) : 3, endTimeIdx: endTimeOptions.indexOf(ev.endTime) !== -1 ? endTimeOptions.indexOf(ev.endTime) : 6 });
+                    let name = ev.eventType === '기타' ? ev.schoolName : (ev.schoolName || '').replace(/(유치원|초|중)$/, '');
+                    setFormData({ ...ev, eventType: ev.eventType || '정규', schoolName: name });
                 } else { setEditingEvent(null); setFormData(initialForm); }
                 setIsModalOpen(true);
             };
@@ -496,11 +833,10 @@
                             </nav>
                         </div>
                         <div className="flex items-center gap-2">
-                            {/* PC 전용 톱니바퀴 + 기능 버튼 영역 */}
                             {!isMobile && (
                                 <div className="flex items-center gap-2 mr-2 border-r border-slate-200 pr-4">
                                     <button onClick={toggleMasterEvents} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all border ${isMasterOn ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
-                                        <Icon name="check" size={12} /> 토글 마스터 {isMasterOn ? 'ON' : 'OFF'}
+                                        <Icon name="check" size={12} /> 주중 프로그램 {isMasterOn ? 'ON' : 'OFF'}
                                     </button>
                                     <button onClick={() => setIsHolidayMode(!isHolidayMode)} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-all border ${isHolidayMode ? 'bg-red-500 text-white border-red-500 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                         <Icon name="alert" size={12} /> 휴일 모드
@@ -515,7 +851,18 @@
                                 <div className="px-2 font-black text-sm min-w-[90px] text-center text-slate-900">{currentDate.getFullYear()}.{String(currentDate.getMonth() + 1).padStart(2, '0')}</div>
                                 <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-1 hover:bg-slate-50 text-slate-700"><Icon name="chevronRight" size={16} /></button>
                             </div>
-                            <button onClick={() => window.print()} className="hidden md:block bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-[11px] shadow-sm hover:bg-black transition-all">PRINT</button>
+                            
+                            <div className="hidden md:flex items-center gap-1">
+                                <button onClick={downloadTemplate} className="flex items-center gap-1.5 bg-slate-100 text-slate-600 px-3 py-2 rounded-xl font-bold text-[11px] border border-slate-200 shadow-sm hover:bg-slate-200 transition-all">
+                                    <Icon name="downloadCloud" size={14} /> 양식 다운
+                                </button>
+                                <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                                <button onClick={handleUploadButtonClick} className="flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-2 rounded-xl font-bold text-[11px] shadow-sm hover:bg-emerald-700 transition-all">
+                                    <Icon name="upload" size={14} /> 업로드
+                                </button>
+                            </div>
+                            
+                            <button onClick={handlePrint} className="hidden md:block bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-[11px] shadow-sm hover:bg-black transition-all">PRINT</button>
                         </div>
                     </header>
 
@@ -536,17 +883,12 @@
                                                 const isToday = dStr === new Date().toISOString().split('T')[0];
                                                 const dow = date ? date.getDay() : -1;
 
-                                                const showItem1 = settings.isAfterSchoolEnglish.name && settings.isAfterSchoolEnglish.days.includes(dow) && !isWe;
-                                                const showItem2 = settings.isChineseOnline.name && settings.isChineseOnline.days.includes(dow) && !isWe;
-                                                const showItem3 = settings.isEnglishOnline.name && settings.isEnglishOnline.days.includes(dow) && !isWe;
-                                                const showItem4 = settings.isSpecialLecture.name && isWe;
-
                                                 let dateColor = 'opacity-0';
                                                 let bgColor = 'bg-slate-50';
                                                 
                                                 if (date) {
                                                     bgColor = isToday ? 'bg-blue-50/50' : 'bg-white hover:bg-blue-50/10';
-                                                    if (isWe && ev?.isSpecialLecture && showItem4 && !isMobile && !ev?.isHoliday) {
+                                                    if (isWe && ev?.isSpecialLecture && settings.isSpecialLecture?.name && !isMobile && !ev?.isHoliday) {
                                                         bgColor = '!bg-blue-700'; dateColor = '!text-white';
                                                     } else if (ev?.isHoliday) {
                                                         bgColor = 'bg-red-50/30'; dateColor = 'text-red-600';
@@ -564,11 +906,8 @@
                                                         key={`${wIdx}-${cIdx}`} 
                                                         onClick={() => {
                                                             if (!date) return;
-                                                            if (isHolidayMode) {
-                                                                toggleHoliday(dStr, ev);
-                                                            } else if (!isWe) {
-                                                                handleCellClick(dStr, ev);
-                                                            }
+                                                            if (isHolidayMode) toggleHoliday(dStr, ev);
+                                                            else if (!isWe) handleCellClick(dStr, ev);
                                                         }}
                                                         onContextMenu={(e) => dStr && !isWe && handleContextMenu(e, dStr, ev)} 
                                                         onDragOver={dStr && !isWe ? handleDragOver : null} 
@@ -581,15 +920,20 @@
                                                                 <span className={`${isMobile && isWe ? 'text-[10px]' : isMobile ? 'text-xs' : 'text-base'} font-black ${dateColor}`}>{date?.getDate()}</span>
                                                                 {isMobile && ev?.note && !ev?.isHoliday && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-sm mt-0.5"></div>}
                                                             </div>
-                                                            {date && !ev?.isHoliday && <div className="hidden md:flex gap-0.5 print:hidden opacity-60 hover:opacity-100 transition-opacity">
-                                                                {showItem4 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isSpecialLecture'); }} className={`p-0.5 rounded ${ev?.isSpecialLecture ? 'text-yellow-400 bg-blue-800' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="star" size={14} /></button>}
-                                                                {showItem1 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isAfterSchoolEnglish'); }} className={`p-0.5 rounded ${ev?.isAfterSchoolEnglish ? 'text-emerald-600 bg-emerald-50 ring-1 ring-emerald-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="book" size={14} /></button>}
-                                                                {showItem2 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isChineseOnline'); }} className={`p-0.5 rounded ${ev?.isChineseOnline ? 'text-amber-600 bg-amber-50 ring-1 ring-amber-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="globe" size={14} /></button>}
-                                                                {showItem3 && <button onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, 'isEnglishOnline'); }} className={`p-0.5 rounded ${ev?.isEnglishOnline ? 'text-purple-600 bg-purple-50 ring-1 ring-purple-200' : 'text-slate-500 hover:text-slate-800'}`}><Icon name="globe" size={14} /></button>}
+                                                            {date && !ev?.isHoliday && <div className="hidden md:flex gap-0.5 print:hidden opacity-60 hover:opacity-100 transition-opacity flex-wrap justify-end">
+                                                                {toggleConfigs.map(conf => {
+                                                                    const show = settings[conf.key]?.name && (conf.isFixed ? isWe : (!isWe && settings[conf.key]?.days?.includes(dow)));
+                                                                    if (!show) return null;
+                                                                    const isActive = ev?.[conf.key];
+                                                                    return (
+                                                                        <button key={conf.key} onClick={(e) => { e.stopPropagation(); toggleAct(dStr, ev, conf.key); }} className={`p-0.5 rounded ${isActive ? conf.color : 'text-slate-500 hover:text-slate-800'}`}>
+                                                                            <Icon name={conf.defaultIcon} size={14} />
+                                                                        </button>
+                                                                    )
+                                                                })}
                                                             </div>}
                                                         </div>
 
-                                                        {/* 일정 또는 휴일 렌더링 블록 */}
                                                         {ev?.isHoliday ? (
                                                             isMobile ? (
                                                                 <div className="flex-1 min-h-0 flex flex-col justify-center items-center px-0.5 pt-1">
@@ -605,40 +949,51 @@
                                                                 {!isWe && ev && ev.schoolName && (
                                                                     isMobile ? (
                                                                         <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-0.5 pt-0.5 justify-start">
-                                                                            <div className={`text-slate-900 font-black text-[10px] leading-none ${ev.schoolName.length > 6 ? 'marquee-container w-full' : 'truncate'}`}><span className={ev.schoolName.length > 6 ? 'marquee-text' : ''}>{ev.schoolName}</span></div>
-                                                                            {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="text-blue-700 font-black text-[9px] leading-none truncate">{ev.selectedGrades?.length === 1 ? (ev.classNum !== '-' ? `${ev.selectedGrades[0]}-${ev.classNum}` : ev.selectedGrades[0]) : ev.selectedGrades?.join(',')}</div>}
+                                                                            <div className={`${ev.eventType === '기타' ? 'text-emerald-600' : 'text-slate-900'} font-black text-[10px] leading-none ${ev.schoolName.length > 6 ? 'marquee-container w-full' : 'truncate'}`}><span className={ev.schoolName.length > 6 ? 'marquee-text' : ''}>{ev.schoolName}</span></div>
+                                                                            {ev.eventType !== '기타' && ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="text-blue-700 font-black text-[9px] leading-none truncate">{ev.selectedGrades?.length === 1 && ev.classNum !== '-' && ev.classNum !== '통합' ? `${ev.selectedGrades[0]}-${ev.classNum}` : `${ev.selectedGrades?.join(',')}학년`}</div>}
                                                                         </div>
                                                                     ) : (
                                                                         <div draggable={!isHolidayMode} onDragStart={(e) => handleDragStart(e, dStr)} onDragEnd={handleDragEnd} className="flex-1 min-h-0 overflow-hidden flex flex-col cursor-move pointer-events-none">
-                                                                            {/* PC 한정 학교명 폰트 크기 19px -> 21px 상향 */}
-                                                                            <div className="text-[21px] font-black text-slate-900 leading-none truncate shrink-0 mb-1 pb-[1px]">{ev.schoolName}</div>
-                                                                            <div className="mt-auto flex flex-col gap-0.5 shrink-0">
-                                                                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-bold text-slate-500 shrink-0 text-[10px]">
-                                                                                    <div className="flex items-center gap-0.5 shrink-0 text-slate-700"><Icon name="clock" size={10} />{ev.startTime}~{ev.endTime}</div>
-                                                                                    {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="flex items-center gap-0.5 text-blue-700 bg-blue-50 px-1 rounded shrink-0 font-black">{ev.selectedGrades?.join(',')}학년{ev.selectedGrades?.length === 1 && ev.classNum !== '-' ? ` ${ev.classNum}반` : ''}</div>}
-                                                                                    <div className="flex items-center gap-0.5 text-emerald-600 font-black shrink-0"><Icon name="users" size={10} />{ev.people}명</div>
-                                                                                </div>
-                                                                                {ev.note ? <div className="text-[11px] text-red-600 font-black truncate leading-tight border-t border-red-50 pt-0.5">{ev.note}</div> : null}
-                                                                            </div>
+                                                                            {ev.eventType === '기타' ? (
+                                                                                <div className="text-[18px] font-black text-emerald-600 leading-tight break-keep overflow-hidden mt-1">{ev.schoolName}</div>
+                                                                            ) : (
+                                                                                <Fragment>
+                                                                                    <div className="text-[21px] font-black text-slate-900 leading-none truncate shrink-0 mb-1 pb-[1px]">{ev.schoolName}</div>
+                                                                                    <div className="mt-auto flex flex-col gap-0.5 shrink-0">
+                                                                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-black shrink-0">
+                                                                                            {ev.schoolType !== '유치원' && ev.selectedGrades?.length > 0 && <div className="text-blue-700 text-[18px] tracking-tighter">{ev.selectedGrades?.length === 1 && ev.classNum !== '-' && ev.classNum !== '통합' ? `${ev.selectedGrades[0]}-${ev.classNum}` : `${ev.selectedGrades?.join(',')}학년`}</div>}
+                                                                                            <div className="text-emerald-600 text-[18px] tracking-tighter">{ev.people}명</div>
+                                                                                        </div>
+                                                                                        {ev.note ? <div className="text-[11px] text-red-600 font-black truncate leading-tight border-t border-red-50 pt-0.5">{ev.note}</div> : null}
+                                                                                    </div>
+                                                                                </Fragment>
+                                                                            )}
                                                                         </div>
                                                                     )
                                                                 )}
 
                                                                 <div className="hidden md:flex print:flex flex-wrap gap-x-1 gap-y-0.5 z-10 shrink-0 mt-0.5 pointer-events-none">
-                                                                    {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-1 rounded truncate border border-emerald-200">[{sessionCounters.isAfterSchoolEnglish[dStr]}] {settings.isAfterSchoolEnglish.name}</div>}
-                                                                    {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="text-[8px] font-black text-amber-700 bg-amber-50 px-1 rounded truncate border border-amber-200">[{sessionCounters.isChineseOnline[dStr]}] {settings.isChineseOnline.name}</div>}
-                                                                    {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="text-[8px] font-black text-purple-700 bg-purple-50 px-1 rounded truncate border border-purple-200">[{sessionCounters.isEnglishOnline[dStr]}] {settings.isEnglishOnline.name}</div>}
-                                                                    {isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && showItem4 && ( <div className="w-full text-white font-black text-center text-[12px] leading-tight py-4 drop-shadow-md">{settings.isSpecialLecture.name}<br/><span className="text-yellow-300">({sessionCounters.isSpecialLecture[dStr]}회)</span></div> )}
+                                                                    {toggleConfigs.map(conf => {
+                                                                        if (ev?.[conf.key] && settings[conf.key]?.name && (conf.isFixed ? isWe : (!isWe && settings[conf.key]?.days?.includes(dow)))) {
+                                                                            if (conf.isFixed) return <div key={conf.key} className="w-full text-white font-black text-center text-[12px] leading-tight py-4 drop-shadow-md">{settings[conf.key].name}<br/><span className="text-yellow-300">({sessionCounters[conf.key][dStr]}회)</span></div>;
+                                                                            return <div key={conf.key} className={`text-[8px] font-black px-1 rounded truncate border ${conf.color}`}>[{sessionCounters[conf.key][dStr]}] {settings[conf.key].name}</div>;
+                                                                        }
+                                                                        return null;
+                                                                    })}
                                                                 </div>
 
-                                                                {isMobile && isWe && ev?.isSpecialLecture && settings.isSpecialLecture.name && (
+                                                                {isMobile && isWe && ev?.isSpecialLecture && settings.isSpecialLecture?.name && (
                                                                     <div className="flex-1 flex items-center justify-center"><div className="text-blue-600 font-black text-[15px] bg-blue-50 w-full text-center py-1 rounded">토</div></div>
                                                                 )}
                                                                 {isMobile && !isWe && date && (
-                                                                    <div className="mt-auto flex gap-1 z-10 shrink-0 pb-0.5 px-0.5">
-                                                                        {ev?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && showItem1 && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-sm"></div>}
-                                                                        {ev?.isChineseOnline && settings.isChineseOnline.name && showItem2 && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-sm"></div>}
-                                                                        {ev?.isEnglishOnline && settings.isEnglishOnline.name && showItem3 && <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shadow-sm"></div>}
+                                                                    <div className="mt-auto flex gap-1 z-10 shrink-0 pb-0.5 px-0.5 flex-wrap">
+                                                                        {toggleConfigs.filter(c => !c.isFixed).map(conf => {
+                                                                            if (ev?.[conf.key] && settings[conf.key]?.name && settings[conf.key]?.days?.includes(dow)) {
+                                                                                const dotColor = conf.color.split(' ')[0].replace('text-', 'bg-').replace('600', '500');
+                                                                                return <div key={conf.key} className={`w-1.5 h-1.5 rounded-full shadow-sm ${dotColor}`}></div>;
+                                                                            }
+                                                                            return null;
+                                                                        })}
                                                                     </div>
                                                                 )}
                                                                 {!ev?.schoolName && !ev?.isSpecialLecture && date && !isWe && <div className="hidden md:flex flex-1 items-center justify-center opacity-0 transition-opacity pointer-events-none"><Icon name="plus" size={32} className="text-slate-300" /></div>}
@@ -656,15 +1011,15 @@
                                 <div className="p-3 md:p-4 border-b bg-slate-50 flex justify-between items-center shrink-0"><h2 className="text-xs md:text-sm font-black">{season.label} 신청 명단 ({listData.length}건)</h2></div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                                     <table className="w-full text-left border-collapse text-[10px] md:text-xs">
-                                        <thead className="sticky top-0 bg-slate-900 text-white font-black z-10"><tr><th className="p-2 md:p-3">학교명</th><th className="p-2 md:p-3">날짜</th><th className="p-2 md:p-3">학년/반</th><th className="p-2 md:p-3">인원</th><th className="hidden md:table-cell p-3">시간</th><th className="hidden md:table-cell p-3">특이사항</th></tr></thead>
+                                        <thead className="sticky top-0 bg-slate-900 text-white font-black z-10"><tr><th className="p-2 md:p-3">학교/일정명</th><th className="p-2 md:p-3">구분</th><th className="p-2 md:p-3">날짜</th><th className="p-2 md:p-3">학년/반</th><th className="p-2 md:p-3">인원</th><th className="hidden md:table-cell p-3">특이사항</th></tr></thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {listData.map(e => (
                                                 <tr key={e.date} onClick={() => handleCellClick(e.date, e)} className="hover:bg-blue-50 transition-colors cursor-pointer group">
-                                                    <td className="p-2 md:p-3 font-black text-slate-900 group-hover:text-blue-700 max-w-[80px] truncate">{e.schoolName}</td>
+                                                    <td className={`p-2 md:p-3 font-black ${e.eventType === '기타' ? 'text-emerald-600' : 'text-slate-900 group-hover:text-blue-700'} max-w-[120px] truncate`}>{e.schoolName}</td>
+                                                    <td className="p-2 md:p-3 font-bold text-slate-500">{e.eventType || '정규'}</td>
                                                     <td className="p-2 md:p-3 font-black text-blue-600">{e.date}</td>
-                                                    <td className="p-2 md:p-3 font-bold">{e.schoolType === '유치원' ? '유치원' : `${e.selectedGrades?.join(',')}학년${e.classNum !== '-' ? ` ${e.classNum}반` : ''}`}</td>
-                                                    <td className="p-2 md:p-3 font-black text-emerald-600">{e.people}명</td>
-                                                    <td className="hidden md:table-cell p-3 text-slate-700 font-bold">{e.startTime}~{e.endTime}</td>
+                                                    <td className="p-2 md:p-3 font-bold">{e.eventType === '기타' ? '-' : (e.schoolType === '유치원' ? '유치원' : (e.selectedGrades?.length === 1 && e.classNum !== '-' && e.classNum !== '통합' ? `${e.selectedGrades[0]}-${e.classNum}` : `${e.selectedGrades?.join(',')}학년`))}</td>
+                                                    <td className="p-2 md:p-3 font-black text-emerald-600">{e.eventType === '기타' ? '-' : `${e.people}명`}</td>
                                                     <td className="hidden md:table-cell p-3 text-red-600 font-black truncate max-w-[200px]">{e.note || '-'}</td>
                                                 </tr>
                                             ))}
@@ -675,78 +1030,96 @@
                         )}
                     </main>
 
-                    {/* PC 설정 모달 */}
                     {isSettingsModalOpen && !isMobile && (
                         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-                            <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
-                                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-                                    <h2 className="text-lg font-black text-slate-800 flex items-center gap-2"><Icon name="settings" size={18} className="text-slate-600" /> {season.label} 토글 일정 설정</h2>
+                            <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+                                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+                                    <h2 className="text-lg font-black text-slate-800 flex items-center gap-2"><Icon name="settings" size={18} className="text-slate-600" /> 시스템 설정 및 백업 관리</h2>
                                     <button onClick={() => setIsSettingsModalOpen(false)} className="p-1 hover:bg-slate-200 rounded-full transition-all"><Icon name="x" size={20} /></button>
                                 </div>
-                                <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar text-sm bg-white">
-                                    <div className="text-xs font-bold text-slate-500 mb-2 leading-relaxed">이름을 빈칸으로 저장하면 해당 일정 아이콘은 달력에서 완전히 숨김 처리됩니다.</div>
-                                    {[
-                                        { key: 'isAfterSchoolEnglish', defaultIcon: 'book', color: 'text-emerald-600 bg-emerald-50' },
-                                        { key: 'isChineseOnline', defaultIcon: 'globe', color: 'text-amber-600 bg-amber-50' },
-                                        { key: 'isEnglishOnline', defaultIcon: 'globe', color: 'text-purple-600 bg-purple-50' },
-                                        { key: 'isSpecialLecture', defaultIcon: 'star', color: 'text-yellow-500 bg-blue-800', isFixed: true }
-                                    ].map(item => (
-                                        <div key={item.key} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 shadow-sm space-y-3">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2 flex-1">
-                                                    <div className={`p-1.5 rounded-lg ${item.color}`}><Icon name={item.defaultIcon} size={14} /></div>
-                                                    {editingKey === item.key ? (
-                                                        <div className="flex items-center gap-1 flex-1 max-w-[200px]">
-                                                            <input type="text" autoFocus value={tempSettings[item.key].name} onChange={e => setTempSettings(p => ({...p, [item.key]: {...p[item.key], name: e.target.value}}))} onKeyDown={e => e.key === 'Enter' && setEditingKey(null)} className="w-full px-2 py-1 text-sm font-black border border-blue-400 rounded outline-none shadow-inner" placeholder="이름 비우기=숨김" />
-                                                            <button onClick={() => setEditingKey(null)} className="p-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"><Icon name="check" size={14} /></button>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setEditingKey(item.key)}>
-                                                            <span className={`text-sm font-black ${tempSettings[item.key].name ? 'text-slate-800' : 'text-slate-400 italic'}`}>{tempSettings[item.key].name || '(숨김 상태)'}</span>
-                                                            <button className="text-slate-300 group-hover:text-blue-500 transition-colors"><Icon name="edit" size={14} /></button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            {!item.isFixed ? (
-                                                <div className="flex items-center gap-1.5 pl-9">
-                                                    {[{lbl:'월', v:1}, {lbl:'화', v:2}, {lbl:'수', v:3}, {lbl:'목', v:4}, {lbl:'금', v:5}].map(d => {
-                                                        const active = tempSettings[item.key].days.includes(d.v);
-                                                        return (
-                                                            <button key={d.v} onClick={() => toggleTempDay(item.key, d.v)} className={`w-8 h-8 rounded-full text-xs font-black transition-all border ${active ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'}`}>{d.lbl}</button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : ( <div className="pl-9 text-xs font-bold text-slate-400">주말 고정 배치</div> )}
+                                
+                                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-white flex flex-col gap-8">
+                                    <section className="space-y-4">
+                                        <div className="flex items-center gap-2 border-b pb-2">
+                                            <Icon name="layout" size={16} className="text-blue-600" />
+                                            <h3 className="font-black text-slate-800">주중/토요 프로그램 설정</h3>
                                         </div>
-                                    ))}
+                                        <div className="text-xs font-bold text-slate-500 mb-2">이름을 빈칸으로 저장하면 해당 일정 아이콘은 달력에서 완전히 숨김 처리됩니다.</div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {toggleConfigs.map(item => (
+                                                <div key={item.key} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 shadow-sm space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2 flex-1">
+                                                            <div className={`p-1.5 rounded-lg ${item.color}`}><Icon name={item.defaultIcon} size={14} /></div>
+                                                            {editingKey === item.key ? (
+                                                                <div className="flex items-center gap-1 flex-1 max-w-[200px]">
+                                                                    <input type="text" autoFocus value={tempSettings[item.key]?.name || ''} onChange={e => setTempSettings(p => ({...p, [item.key]: {...p[item.key], name: e.target.value}}))} onKeyDown={e => e.key === 'Enter' && setEditingKey(null)} className="w-full px-2 py-1 text-sm font-black border border-blue-400 rounded outline-none shadow-inner" placeholder="이름 비우기=숨김" />
+                                                                    <button onClick={() => setEditingKey(null)} className="p-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"><Icon name="check" size={14} /></button>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setEditingKey(item.key)}>
+                                                                    <span className={`text-sm font-black ${tempSettings[item.key]?.name ? 'text-slate-800' : 'text-slate-400 italic'}`}>{tempSettings[item.key]?.name || '(숨김 상태)'}</span>
+                                                                    <button className="text-slate-300 group-hover:text-blue-500 transition-colors"><Icon name="edit" size={14} /></button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {!item.isFixed ? (
+                                                        <div className="flex items-center gap-1.5 pl-9">
+                                                            {[{lbl:'월', v:1}, {lbl:'화', v:2}, {lbl:'수', v:3}, {lbl:'목', v:4}, {lbl:'금', v:5}].map(d => {
+                                                                const active = tempSettings[item.key]?.days?.includes(d.v);
+                                                                return (
+                                                                    <button key={d.v} onClick={() => toggleTempDay(item.key, d.v)} className={`w-8 h-8 rounded-full text-xs font-black transition-all border ${active ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'}`}>{d.lbl}</button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ) : ( <div className="pl-9 text-xs font-bold text-slate-400">주말 고정 배치</div> )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </section>
+
+                                    <section className="space-y-4">
+                                        <div className="flex items-center justify-between border-b pb-2">
+                                            <div className="flex items-center gap-2">
+                                                <Icon name="save" size={16} className="text-emerald-600" />
+                                                <h3 className="font-black text-slate-800">데이터 백업 및 복원 관리</h3>
+                                            </div>
+                                            <button onClick={() => createBackup('수동 백업')} className="text-xs font-black bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-900 transition-all shadow-sm">현재 상태 수동 백업</button>
+                                        </div>
+                                        <div className="text-xs font-bold text-slate-500 mb-2">업로드 등 중요 작업 전의 데이터가 기록되며, 클릭하여 과거 상태로 복원할 수 있습니다.</div>
+                                        <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto custom-scrollbar">
+                                            {backups.length === 0 ? (
+                                                <div className="p-4 text-center text-slate-400 text-xs font-bold">저장된 백업 파일이 없습니다.</div>
+                                            ) : (
+                                                <ul className="divide-y divide-slate-200">
+                                                    {backups.map(bk => {
+                                                        const bkDate = new Date(bk.timestamp);
+                                                        const formattedTime = `${bkDate.getFullYear()}.${String(bkDate.getMonth()+1).padStart(2,'0')}.${String(bkDate.getDate()).padStart(2,'0')} ${String(bkDate.getHours()).padStart(2,'0')}:${String(bkDate.getMinutes()).padStart(2,'0')}`;
+                                                        return (
+                                                            <li key={bk.id} className="p-3 flex items-center justify-between hover:bg-white transition-colors">
+                                                                <div className="flex flex-col gap-0.5">
+                                                                    <span className="text-sm font-black text-slate-800">{bk.label}</span>
+                                                                    <span className="text-[10px] font-bold text-slate-400">{formattedTime} (저장된 일정: {bk.data.length}개)</span>
+                                                                </div>
+                                                                <button onClick={() => requestRestoreBackup(bk.id)} className="flex items-center gap-1 text-xs font-black text-blue-600 bg-blue-50 px-2 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition-all"><Icon name="refresh" size={14} /> 복원</button>
+                                                            </li>
+                                                        )
+                                                    })}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    </section>
                                 </div>
-                                <div className="p-4 border-t border-slate-100 flex gap-3 bg-slate-50">
-                                    <button onClick={() => setIsSettingsModalOpen(false)} className="flex-1 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-600 font-black hover:bg-slate-100 transition-all">취소</button>
-                                    <button onClick={requestSettingsSave} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-black hover:bg-blue-700 transition-all shadow-md">저장</button>
+
+                                <div className="p-4 border-t border-slate-100 flex gap-3 bg-slate-50 shrink-0">
+                                    <button onClick={() => setIsSettingsModalOpen(false)} className="flex-1 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-600 font-black hover:bg-slate-100 transition-all">닫기 및 취소</button>
+                                    <button onClick={requestSettingsSave} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-black hover:bg-blue-700 transition-all shadow-md">설정 저장</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* PC 설정 변경 경고 커스텀 모달 */}
-                    {pendingSettingsSave && !isMobile && (
-                        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in zoom-in duration-150">
-                            <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-red-100">
-                                <div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500"><Icon name="alert" size={32} /></div>
-                                <h3 className="text-xl font-black text-slate-900 mb-2">변경 사항 적용 경고</h3>
-                                <p className="text-slate-500 text-sm font-bold mb-6 text-center leading-relaxed">
-                                    이름이나 요일 배치가 변경된 항목의 <span className="text-red-500">기존 등록된 일정(토글) 기록이 모두 삭제</span>됩니다.<br/>그래도 적용하시겠습니까?
-                                </p>
-                                <div className="flex gap-3 mt-4">
-                                    <button onClick={() => setPendingSettingsSave(null)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200 transition-all">취소</button>
-                                    <button onClick={confirmSettingsSave} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black hover:bg-red-600 shadow-lg transition-all">확인 및 적용</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* 모바일 날짜 클릭 상세 조회 모달 */}
                     {detailModalData && (
                         <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in duration-200" onClick={() => setDetailModalData(null)}>
                             <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden border border-slate-200 shadow-2xl p-5 relative" onClick={(e) => e.stopPropagation()}>
@@ -757,12 +1130,13 @@
                                     <div className="text-lg font-black text-red-500 py-6 text-center tracking-widest bg-red-50 rounded-xl border border-red-100">지정된 휴일입니다.</div>
                                 ) : detailModalData.event?.schoolName ? (
                                     <div className="space-y-2">
-                                        <div className="text-xl font-black text-slate-900">{detailModalData.event.schoolName}</div>
-                                        <div className="text-sm font-bold text-slate-600 flex justify-between border-b border-slate-50 pb-2">
-                                            <span>{detailModalData.event.schoolType === '유치원' ? '유치원' : `${detailModalData.event.selectedGrades?.join(',')}학년 ${detailModalData.event.classNum}반`}</span>
-                                            <span className="text-emerald-600 font-black">{detailModalData.event.people}명</span>
-                                        </div>
-                                        <div className="text-xs font-bold text-slate-500 py-1">시간: <span className="text-slate-800">{detailModalData.event.startTime} ~ {detailModalData.event.endTime}</span></div>
+                                        <div className={`text-xl font-black ${detailModalData.event.eventType === '기타' ? 'text-emerald-600' : 'text-slate-900'}`}>{detailModalData.event.schoolName}</div>
+                                        {detailModalData.event.eventType !== '기타' && (
+                                            <div className="text-sm font-bold text-slate-600 flex justify-between border-b border-slate-50 pb-2">
+                                                <span>{detailModalData.event.schoolType === '유치원' ? '유치원' : (detailModalData.event.selectedGrades?.length === 1 && detailModalData.event.classNum !== '-' && detailModalData.event.classNum !== '통합' ? `${detailModalData.event.selectedGrades[0]}-${detailModalData.event.classNum}` : `${detailModalData.event.selectedGrades?.join(',')}학년`)}</span>
+                                                <span className="text-emerald-600 font-black">{detailModalData.event.people}명</span>
+                                            </div>
+                                        )}
                                         {detailModalData.event.note && <div className="mt-2 text-xs font-black text-red-600 bg-red-50 p-2.5 rounded-xl border border-red-100">특이사항: {detailModalData.event.note}</div>}
                                     </div>
                                 ) : ( <div className="text-sm font-bold text-slate-400 py-4 text-center">등록된 일정이 없습니다.</div> )}
@@ -771,34 +1145,15 @@
                                     <div className="mt-4 pt-3 border-t border-slate-100">
                                         <div className="text-[10px] font-black text-slate-400 mb-2">기타 일정</div>
                                         <div className="flex flex-wrap gap-2">
-                                            {detailModalData.event?.isSpecialLecture && settings.isSpecialLecture.name && <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-[11px] font-black border border-blue-200">{settings.isSpecialLecture.name}</span>}
-                                            {detailModalData.event?.isAfterSchoolEnglish && settings.isAfterSchoolEnglish.name && <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded text-[11px] font-black border border-emerald-200">{settings.isAfterSchoolEnglish.name}</span>}
-                                            {detailModalData.event?.isChineseOnline && settings.isChineseOnline.name && <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-[11px] font-black border border-amber-200">{settings.isChineseOnline.name}</span>}
-                                            {detailModalData.event?.isEnglishOnline && settings.isEnglishOnline.name && <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-[11px] font-black border border-purple-200">{settings.isEnglishOnline.name}</span>}
+                                            {toggleConfigs.map(conf => {
+                                                if (detailModalData.event?.[conf.key] && settings[conf.key]?.name) {
+                                                    return <span key={conf.key} className={`px-2 py-1 rounded text-[11px] font-black border ${conf.color}`}>{settings[conf.key].name}</span>;
+                                                }
+                                                return null;
+                                            })}
                                         </div>
                                     </div>
                                 )}
-                            </div>
-                        </div>
-                    )}
-
-                    {contextMenu && !isMobile && !isHolidayMode && (
-                        <div className="fixed z-[300] bg-white border border-slate-200 shadow-2xl rounded-xl py-2 w-48" style={{ left: contextMenu.x, top: contextMenu.y }}>
-                            {contextMenu.event?.schoolName && ( <button onClick={() => copyEvent(contextMenu.event)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-slate-700"><Icon name="copy" size={16} /> 학교 일정 복사</button> )}
-                            {copiedEvent && ( <button onClick={() => pasteEvent(contextMenu.date)} className="w-full px-4 py-2.5 text-left text-sm font-bold flex items-center gap-2 hover:bg-slate-50 text-blue-600"><Icon name="check" size={16} /> 여기에 일정 붙여넣기</button> )}
-                        </div>
-                    )}
-
-                    {isDeleteConfirmOpen && (
-                        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in zoom-in duration-150">
-                            <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border">
-                                <div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500"><Icon name="alert" size={32} /></div>
-                                <h3 className="text-xl font-black text-slate-900 mb-2">삭제할까요?</h3>
-                                <p className="text-slate-500 text-sm font-bold mb-8 text-center leading-tight">선택한 날짜의 학교 관련 정보만 삭제됩니다.</p>
-                                <div className="flex gap-3 mt-4">
-                                    <button onClick={() => setIsDeleteConfirmOpen(false)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200">취소</button>
-                                    <button onClick={deleteConfirmed} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-black hover:bg-red-600 shadow-lg">삭제 확정</button>
-                                </div>
                             </div>
                         </div>
                     )}
@@ -807,34 +1162,64 @@
                         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
                             <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
                                 <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shadow-sm">
-                                    <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2"><Icon name="check" size={18} className="text-blue-600" /> 학교 일정 관리</h2>
+                                    <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2"><Icon name="check" size={18} className="text-blue-600" /> 일정 관리</h2>
                                     <button onClick={closeModal} className="p-1 hover:bg-slate-200 rounded-full active:scale-90 transition-all"><Icon name="x" size={20} /></button>
                                 </div>
                                 <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar text-sm">
-                                    <div className="bg-blue-50 px-3 py-2 rounded-xl text-blue-700 text-xs font-black flex justify-between shrink-0"><span>{selectedDate}</span><span className="opacity-60 underline tracking-tighter">공용 편집 모드</span></div>
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <div className="col-span-1 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">학교급</label><select value={formData.schoolType} onChange={(e) => setFormData({...formData, schoolType: e.target.value})} className="w-full px-2 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-bold outline-none cursor-pointer transition-all focus:ring-1 focus:ring-blue-500"><option value="유치원">유치원</option><option value="초등학교">초등학교</option><option value="중학교">중학교</option></select></div>
-                                        <div className="col-span-2 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">학교명 (급 제외 입력)</label><input required type="text" value={formData.schoolName} onChange={(e) => setFormData({...formData, schoolName: e.target.value})} placeholder="학교 이름을 입력하세요" className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-black outline-none focus:bg-white transition-all shadow-inner" /></div>
+                                    <div className="bg-blue-50 px-3 py-2 rounded-xl text-blue-700 text-xs font-black flex justify-between shrink-0 mb-2"><span>{selectedDate}</span><span className="opacity-60 underline tracking-tighter">공용 편집 모드</span></div>
+                                    
+                                    <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
+                                        <button type="button" onClick={() => setFormData({...formData, eventType: '정규'})} className={`flex-1 py-2 rounded-lg text-sm font-black transition-all ${formData.eventType === '정규' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>정규 프로그램</button>
+                                        <button type="button" onClick={() => setFormData({...formData, eventType: '기타'})} className={`flex-1 py-2 rounded-lg text-sm font-black transition-all ${formData.eventType === '기타' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>기타 일정</button>
                                     </div>
-                                    <div className="bg-slate-100/50 p-4 rounded-3xl space-y-3 border border-slate-100 shadow-sm">
-                                        {formData.schoolType !== '유치원' && (
-                                            <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase flex justify-between">학년 선택 <span>다중 선택 가능</span></label><div className="grid grid-cols-6 gap-1.5">{(formData.schoolType === '초등학교' ? [1,2,3,4,5,6] : [1,2,3]).map(n => <button key={n} type="button" onClick={() => { let news = formData.selectedGrades.includes(n.toString()) ? formData.selectedGrades.filter(x => x !== n.toString()) : [...formData.selectedGrades, n.toString()]; setFormData({...formData, selectedGrades: news, classNum: news.length === 1 ? formData.classNum : '-'}); }} className={`py-1.5 rounded-xl text-[11px] font-black border transition-all ${formData.selectedGrades.includes(n.toString()) ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-100'}`}>{n}</button>)}</div></div>
-                                        )}
-                                        <div className="grid grid-cols-2 gap-3 items-end">
-                                            <div className="space-y-1"><label className="text-[10px] font-black text-slate-500 uppercase">반 (단일학년 시)</label><select disabled={formData.selectedGrades.length !== 1} value={formData.classNum} onChange={(e) => setFormData({...formData, classNum: e.target.value})} className={`w-full px-3 py-1.5 rounded-xl border border-white bg-white font-bold text-xs shadow-sm ${formData.selectedGrades.length === 1 ? 'opacity-100' : 'opacity-40'}`}><option value="-">-</option>{[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}반</option>)}<option value="통합">통합</option></select></div>
-                                            <div className="space-y-1"><label className="text-[10px] font-black text-slate-500 uppercase">인원수</label><input type="text" value={formData.people} onChange={(e) => setFormData({...formData, people: e.target.value})} className="w-full px-3 py-1.5 rounded-xl border border-white bg-white font-bold text-xs shadow-sm" /></div>
+
+                                    {formData.eventType === '기타' ? (
+                                        <div className="space-y-1 py-4">
+                                            <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">일정 이름</label>
+                                            <input required autoFocus type="text" value={formData.schoolName} onChange={(e) => setFormData({...formData, schoolName: e.target.value})} placeholder="예) 방학 캠프, 학부모 공개수업 등" className="w-full px-4 py-3.5 rounded-xl border border-emerald-100 bg-emerald-50/30 font-black text-emerald-700 text-base outline-none focus:ring-2 focus:ring-emerald-500 transition-all shadow-inner placeholder-emerald-300" />
                                         </div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="bg-blue-50/30 p-3 rounded-2xl border border-blue-50 space-y-2 shadow-sm"><div className="flex justify-between text-[10px] font-black text-blue-400 uppercase tracking-widest"><span>시작</span> <span className="text-blue-700 font-bold">{startTimeOptions[formData.startTimeIdx]}</span></div><input type="range" min="0" max={startTimeOptions.length - 1} step="1" value={formData.startTimeIdx} onChange={(e) => setFormData({...formData, startTimeIdx: parseInt(e.target.value)})} className="w-full" /></div>
-                                        <div className="bg-emerald-50/30 p-3 rounded-2xl border border-emerald-50 space-y-2 shadow-sm"><div className="flex justify-between text-[10px] font-black text-emerald-400 uppercase tracking-widest"><span>종료</span> <span className="text-emerald-700 font-bold">{endTimeOptions[formData.endTimeIdx]}</span></div><input type="range" min="0" max={endTimeOptions.length - 1} step="1" value={formData.endTimeIdx} onChange={(e) => setFormData({...formData, endTimeIdx: parseInt(e.target.value)})} className="w-full" /></div>
-                                    </div>
-                                    <div className="space-y-1"><label className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1"><Icon name="alert" size={10} /> 특이사항</label><input type="text" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="여기에 메모를 입력하세요" className="w-full px-4 py-2.5 rounded-xl border border-red-50 bg-red-50/20 font-black text-red-600 text-sm outline-none focus:ring-1 focus:ring-red-500 transition-all shadow-inner" /></div>
+                                    ) : (
+                                        <Fragment>
+                                            <div className="grid grid-cols-3 gap-3">
+                                                <div className="col-span-1 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">학교급</label><select value={formData.schoolType} onChange={(e) => setFormData({...formData, schoolType: e.target.value})} className="w-full px-2 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-bold outline-none cursor-pointer transition-all focus:ring-1 focus:ring-blue-500"><option value="유치원">유치원</option><option value="초등학교">초등학교</option><option value="중학교">중학교</option></select></div>
+                                                <div className="col-span-2 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">학교명 (급 제외 입력)</label><input required type="text" value={formData.schoolName} onChange={(e) => setFormData({...formData, schoolName: e.target.value})} placeholder="학교 이름을 입력하세요" className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-black outline-none focus:bg-white transition-all shadow-inner" /></div>
+                                            </div>
+                                            <div className="bg-slate-100/50 p-4 rounded-3xl space-y-3 border border-slate-100 shadow-sm">
+                                                {formData.schoolType !== '유치원' && (
+                                                    <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase flex justify-between">학년 선택 <span>다중 선택 가능</span></label><div className="grid grid-cols-6 gap-1.5">{(formData.schoolType === '초등학교' ? [1,2,3,4,5,6] : [1,2,3]).map(n => <button key={n} type="button" onClick={() => { let news = (formData.selectedGrades || []).includes(n.toString()) ? formData.selectedGrades.filter(x => x !== n.toString()) : [...(formData.selectedGrades || []), n.toString()]; setFormData({...formData, selectedGrades: news, classNum: news.length === 1 ? formData.classNum : '-'}); }} className={`py-1.5 rounded-xl text-[11px] font-black border transition-all ${(formData.selectedGrades || []).includes(n.toString()) ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-105' : 'bg-white text-slate-400 border-slate-100'}`}>{n}</button>)}</div></div>
+                                                )}
+                                                <div className="grid grid-cols-2 gap-3 items-end">
+                                                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-500 uppercase">반 (단일학년 시)</label><select disabled={(formData.selectedGrades || []).length !== 1} value={formData.classNum} onChange={(e) => setFormData({...formData, classNum: e.target.value})} className={`w-full px-3 py-1.5 rounded-xl border border-white bg-white font-bold text-xs shadow-sm ${(formData.selectedGrades || []).length === 1 ? 'opacity-100' : 'opacity-40'}`}><option value="-">-</option>{[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={n}>{n}반</option>)}<option value="통합">통합</option></select></div>
+                                                    <div className="space-y-1"><label className="text-[10px] font-black text-slate-500 uppercase">인원수</label><input type="text" value={formData.people} onChange={(e) => setFormData({...formData, people: e.target.value})} className="w-full px-3 py-1.5 rounded-xl border border-white bg-white font-bold text-xs shadow-sm" /></div>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1"><label className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1"><Icon name="alert" size={10} /> 특이사항</label><input type="text" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="여기에 메모를 입력하세요" className="w-full px-4 py-2.5 rounded-xl border border-red-50 bg-red-50/20 font-black text-red-600 text-sm outline-none focus:ring-1 focus:ring-red-500 transition-all shadow-inner" /></div>
+                                        </Fragment>
+                                    )}
                                     <div className="pt-2 flex gap-3">
-                                        {editingEvent && <button type="button" onClick={() => setIsDeleteConfirmOpen(true)} className="p-3 text-red-500 hover:bg-red-50 rounded-xl border border-red-100 shadow-sm active:scale-90 transition-all"><Icon name="trash" size={18} /></button>}
+                                        {editingEvent && <button type="button" onClick={requestDelete} className="p-3 text-red-500 hover:bg-red-50 rounded-xl border border-red-100 shadow-sm active:scale-90 transition-all"><Icon name="trash" size={18} /></button>}
                                         <button type="submit" className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-black text-sm hover:bg-black transition-all shadow-xl active:scale-[0.98]">일정 저장</button>
                                     </div>
                                 </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 모든 시스템 알림 및 확인을 처리하는 최상위 커스텀 모달 (Iframe 보안 이슈 완벽 회피) */}
+                    {sysDialog && (
+                        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in duration-200">
+                            <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-slate-200">
+                                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${sysDialog.type === 'confirm' && !sysDialog.isError ? 'bg-blue-50 text-blue-500' : (sysDialog.isError ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500')}`}>
+                                    <Icon name={sysDialog.type === 'confirm' ? 'alert' : (sysDialog.isError ? 'alert' : 'check')} size={32} />
+                                </div>
+                                <h3 className="text-xl font-black text-slate-900 mb-3 whitespace-pre-line leading-snug">{sysDialog.title}</h3>
+                                <p className="text-slate-600 text-sm font-bold mb-8 whitespace-pre-line leading-relaxed">{sysDialog.message}</p>
+                                <div className="flex gap-3 mt-4">
+                                    {sysDialog.type === 'confirm' && (
+                                        <button onClick={() => setSysDialog(null)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200 transition-all">취소</button>
+                                    )}
+                                    <button onClick={() => { if(sysDialog.onConfirm) sysDialog.onConfirm(); setSysDialog(null); }} className={`flex-1 py-3 rounded-xl text-white font-black shadow-lg transition-all ${sysDialog.isError ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'}`}>확인</button>
+                                </div>
                             </div>
                         </div>
                     )}
