@@ -131,9 +131,18 @@
         ];
 
         const App = () => {
+            const getKSTDate = () => {
+                const curr = new Date();
+                const utc = curr.getTime() + (curr.getTimezoneOffset() * 60 * 1000);
+                return new Date(utc + (9 * 60 * 60 * 1000));
+            };
+
             const [user, setUser] = useState(null);
             const [activeTab, setActiveTab] = useState('calendar');
-            const [currentDate, setCurrentDate] = useState(new Date(2026, 2, 1));
+            const [currentDate, setCurrentDate] = useState(() => {
+                const kst = getKSTDate();
+                return new Date(kst.getFullYear(), kst.getMonth(), 1);
+            });
             const [events, setEvents] = useState([]);
             const [settings, setSettings] = useState(defaultSettings);
             const [backups, setBackups] = useState([]);
@@ -888,7 +897,11 @@
                                                 const date = isWe ? cell?.sat : cell;
                                                 const dStr = date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : null;
                                                 const ev = events.find(e => e.date === dStr);
-                                                const isToday = dStr === new Date().toISOString().split('T')[0];
+                                                
+                                                const kstNow = getKSTDate();
+                                                const todayStr = `${kstNow.getFullYear()}-${String(kstNow.getMonth() + 1).padStart(2, '0')}-${String(kstNow.getDate()).padStart(2, '0')}`;
+                                                const isToday = dStr === todayStr;
+                                                
                                                 const dow = date ? date.getDay() : -1;
 
                                                 let dateColor = 'opacity-0';
